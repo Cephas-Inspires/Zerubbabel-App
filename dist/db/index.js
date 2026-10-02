@@ -1,10 +1,16 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import path from 'node:path';
 import { config } from '../config/index.js';
 import { INIT_SCHEMA_SQL } from './schema.js';
 let dbInstance = null;
 export const getDatabase = () => {
     if (!dbInstance) {
-        dbInstance = new Database(config.databasePath);
+        const dir = path.dirname(config.databasePath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        dbInstance = new DatabaseSync(config.databasePath);
         // Execute initialization schema
         dbInstance.exec(INIT_SCHEMA_SQL);
     }
