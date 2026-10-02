@@ -148,9 +148,9 @@ export const renderCockpitHtml = (apiPort: number): string => `
     <div class="status-badges">
       <div class="status-dot" id="socket1Badge"><span class="dot-green"></span> Observer</div>
       <div class="status-dot" id="socket2Badge"><span class="dot-green"></span> SIM</div>
-      <a href="/auth/google" target="_blank" class="status-dot" style="text-decoration:none; color:#60a5fa;" id="googleBadge">
+      <button onclick="handleGoogleConnect()" class="status-dot" style="background:#1e293b; border:none; cursor:pointer; color:#60a5fa;" id="googleBadge">
         Google Connect
-      </a>
+      </button>
     </div>
   </header>
 
@@ -214,6 +214,46 @@ export const renderCockpitHtml = (apiPort: number): string => `
       </div>
     </div>
   </main>
+ 
+  <!-- Google Setup Modal -->
+  <div id="googleModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:#151d2f; border:1px solid #232e47; border-radius:14px; max-width:440px; width:100%; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,0.6);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0; font-size:16px; color:#fff;">🔗 Connect Google Account</h3>
+        <button onclick="closeGoogleModal()" style="background:none; border:none; color:#9ca3af; font-size:20px; cursor:pointer;">✕</button>
+      </div>
+      <p style="font-size:12px; color:#9ca3af; margin-top:0; line-height:1.4;">
+        Sign in with Google to grant Zerubbabel permission to manage your Google Calendar, Google Docs, Google Sheets, Google Tasks, and Drive.
+      </p>
+      
+      <div id="googleConnectedView" style="display:none;">
+        <div style="background:#064e3b; border:1px solid #059669; padding:12px; border-radius:8px; margin-bottom:14px;">
+          <p style="margin:0; font-size:13px; color:#a7f3d0; font-weight:600;">✅ Google Workspace Connected!</p>
+          <p style="margin:4px 0 0; font-size:11px; color:#6ee7b7;">Your account is fully authenticated and synchronized.</p>
+        </div>
+        <button onclick="window.location.href='/auth/google'" style="width:100%; padding:10px; background:#2563eb; color:#fff; border:none; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer;">
+          🔄 Re-Authenticate Google Account
+        </button>
+      </div>
+
+      <div id="googleSetupView" style="display:none;">
+        <div style="margin-bottom:12px;">
+          <label style="font-size:11px; font-weight:600; color:#d1d5db; display:block; margin-bottom:4px;">Google OAuth Client ID</label>
+          <input type="text" id="gClientId" placeholder="e.g. 12345678-xxx.apps.googleusercontent.com" style="width:100%; background:#0b0f19; border:1px solid #374151; color:#fff; padding:8px 10px; border-radius:6px; font-size:12px; box-sizing:border-box;" />
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px; font-weight:600; color:#d1d5db; display:block; margin-bottom:4px;">Google OAuth Client Secret</label>
+          <input type="password" id="gClientSecret" placeholder="e.g. GOCSPX-xxxxxx" style="width:100%; background:#0b0f19; border:1px solid #374151; color:#fff; padding:8px 10px; border-radius:6px; font-size:12px; box-sizing:border-box;" />
+        </div>
+        <button onclick="saveGoogleCreds()" style="width:100%; padding:11px; background:#2563eb; color:#fff; border:none; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; margin-bottom:10px;">
+          💾 Save &amp; Log In With Google
+        </button>
+        <p style="font-size:11px; color:#6b7280; text-align:center; margin:0; line-height:1.4;">
+          Redirect URI registered on Google Console must be: <br><code style="color:#60a5fa;">http://localhost:4892/auth/google/callback</code>
+        </p>
+      </div>
+    </div>
+  </div>
 
   <!-- Bottom Navigation -->
   <nav class="bottom-nav">
@@ -257,6 +297,25 @@ export const renderCockpitHtml = (apiPort: number): string => `
     const sendBtn = document.getElementById('sendBtn');
     const chatList = document.getElementById('chatList');
 
+    // Chat History & Persistence
+    async function loadChat() {
+      try {
+        const res = await fetch('/api/chat');
+        const data = await res.json();
+        if (!data.messages || data.messages.length === 0) return;
+        chatList.innerHTML = '';
+        for (const msg of data.messages) {
+          const div = document.createElement('div');
+          div.className = msg.role === 'user' ? 'msg msg-user' : 'msg msg-assistant';
+          div.innerText = msg.content;
+          chatList.appendChild(div);
+        }
+        chatList.scrollTop = chatList.scrollHeight;
+      } catch (err) {
+        console.error('Failed to load chat history:', err);
+      }
+    }
+
     async function sendChat() {
       const text = chatInput.value.trim();
       if (!text) return;
@@ -269,6 +328,15 @@ export const renderCockpitHtml = (apiPort: number): string => `
       chatList.appendChild(userDiv);
       chatList.scrollTop = chatList.scrollHeight;
 
+      // Show temporary thinking state
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'msg msg-assistant';
+      typingDiv.id = 'tempTyping';
+      typingDiv.innerText = 'Thinking...';
+      typingDiv.style.opacity = '0.6';
+      chatList.appendChild(typingDiv);
+      chatList.scrollTop = chatList.scrollHeight;
+
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
@@ -276,19 +344,91 @@ export const renderCockpitHtml = (apiPort: number): string => `
           body: JSON.stringify({ message: text })
         });
         const data = await res.json();
+        const typingEl = document.getElementById('tempTyping');
+        if (typingEl) typingEl.remove();
+
         const botDiv = document.createElement('div');
         botDiv.className = 'msg msg-assistant';
-        botDiv.innerText = data.reply || 'Message processed.';
+
+        if (data.reply) {
+          botDiv.innerText = data.reply;
+        } else if (data.error) {
+          botDiv.innerText = '⚠️ Error: ' + data.error;
+          botDiv.style.borderColor = '#ef4444';
+          botDiv.style.color = '#fca5a5';
+        } else {
+          botDiv.innerText = 'Instruction received.';
+        }
+
         chatList.appendChild(botDiv);
         chatList.scrollTop = chatList.scrollHeight;
         if (data.type === 'draft_staged') loadDrafts();
       } catch (err) {
+        const typingEl = document.getElementById('tempTyping');
+        if (typingEl) typingEl.remove();
         alert('Network error: ' + err.message);
       }
     }
 
     sendBtn.onclick = sendChat;
     chatInput.onkeydown = (e) => { if (e.key === 'Enter') sendChat(); };
+
+    // Google Setup Handlers
+    async function handleGoogleConnect() {
+      try {
+        const res = await fetch('/api/google/status');
+        const data = await res.json();
+        const modal = document.getElementById('googleModal');
+        const setupView = document.getElementById('googleSetupView');
+        const connectedView = document.getElementById('googleConnectedView');
+
+        if (data.authenticated) {
+          setupView.style.display = 'none';
+          connectedView.style.display = 'block';
+        } else if (data.configured) {
+          // Credentials already configured -> go straight to Google Consent
+          window.location.href = '/auth/google';
+          return;
+        } else {
+          setupView.style.display = 'block';
+          connectedView.style.display = 'none';
+        }
+        modal.style.display = 'flex';
+      } catch (err) {
+        alert('Could not check Google status: ' + err.message);
+      }
+    }
+
+    function closeGoogleModal() {
+      document.getElementById('googleModal').style.display = 'none';
+    }
+
+    async function saveGoogleCreds() {
+      const clientId = document.getElementById('gClientId').value.trim();
+      const clientSecret = document.getElementById('gClientSecret').value.trim();
+
+      if (!clientId || !clientSecret) {
+        alert('Please fill in both Client ID and Client Secret.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/google/credentials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId, clientSecret })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert('Credentials saved! Redirecting to Google Login...');
+          window.location.href = '/auth/google';
+        } else {
+          alert(data.error || 'Failed to save credentials');
+        }
+      } catch (err) {
+        alert('Error saving credentials: ' + err.message);
+      }
+    }
 
     // Load Drafts
     async function loadDrafts() {
@@ -503,6 +643,7 @@ export const renderCockpitHtml = (apiPort: number): string => `
     setInterval(updateStatus, 5000);
     updateStatus();
     loadDrafts();
+    loadChat();
 
     // Service Worker Registration for Standalone PWA Mode
     if ('serviceWorker' in navigator) {

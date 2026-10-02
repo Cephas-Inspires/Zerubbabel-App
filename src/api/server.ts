@@ -479,6 +479,45 @@ self.addEventListener('fetch', (e) => {
     });
 
     // 8. One-Tap Google OAuth Consent & Callback
+    this.app.get('/api/google/status', (req: Request, res: Response) => {
+      const configured = fs.existsSync(config.googleCredentialsPath);
+      const authenticated = fs.existsSync(config.googleTokenPath);
+      res.json({ configured, authenticated });
+    });
+
+    this.app.post('/api/google/credentials', (req: Request, res: Response) => {
+      const { clientId, clientSecret, jsonContent } = req.body;
+      const credsDir = path.dirname(config.googleCredentialsPath);
+      if (!fs.existsSync(credsDir)) fs.mkdirSync(credsDir, { recursive: true });
+
+      if (jsonContent) {
+        try {
+          const parsed = typeof jsonContent === 'string' ? JSON.parse(jsonContent) : jsonContent;
+          fs.writeFileSync(config.googleCredentialsPath, JSON.stringify(parsed, null, 2), 'utf-8');
+          return res.json({ success: true, message: 'Google credentials saved' });
+        } catch (e: any) {
+          return res.status(400).json({ error: 'Invalid JSON file content: ' + e.message });
+        }
+      }
+
+      if (clientId && clientSecret) {
+        const payload = {
+          installed: {
+            client_id: clientId.trim(),
+            client_secret: clientSecret.trim(),
+            auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+            token_uri: 'https://oauth2.googleapis.com/token',
+            auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
+            redirect_uris: ['http://localhost:4892/auth/google/callback']
+          }
+        };
+        fs.writeFileSync(config.googleCredentialsPath, JSON.stringify(payload, null, 2), 'utf-8');
+        return res.json({ success: true, message: 'Google credentials saved' });
+      }
+
+      return res.status(400).json({ error: 'Please provide either clientId + clientSecret, or jsonContent' });
+    });
+
     this.app.get('/auth/google', async (req: Request, res: Response) => {
       if (!fs.existsSync(config.googleCredentialsPath)) {
         return res.status(400).send(`

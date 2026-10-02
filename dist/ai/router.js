@@ -89,22 +89,42 @@ Key Operating Rules:
         }
         catch (error) {
             console.warn(`⚠️ [AI Router] Warning on ${tier} (${modelName}):`, error?.message || error);
-            // Automatic failover logic on rate limit (429), server capacity (503), or quota exceeded
+            // Automatic failover logic on rate limit (429), server capacity (503), quota exceeded, or model not found (404)
             const shouldFailover = error?.status === 429 ||
                 error?.status === 503 ||
+                error?.status === 404 ||
                 error?.message?.includes('429') ||
                 error?.message?.includes('503') ||
+                error?.message?.includes('404') ||
+                error?.message?.includes('not found') ||
+                error?.message?.includes('no longer available') ||
                 error?.message?.includes('RESOURCE_EXHAUSTED') ||
                 error?.message?.includes('UNAVAILABLE') ||
                 error?.message?.includes('high demand');
             if (shouldFailover) {
                 if (tier === 'tier3') {
-                    console.warn('🔄 [AI Router] Failing over from Tier 3 to Tier 2 (Workhorse)...');
+                    console.warn('🔄 [AI Router] Failing over from Tier 3 to Tier 2 (gemini-3.8-flash)...');
                     return this.generate('tier2', contents, options);
                 }
                 else if (tier === 'tier2') {
-                    console.warn('🔄 [AI Router] Failing over from Tier 2 to Tier 1 (Router)...');
+                    console.warn('🔄 [AI Router] Failing over from Tier 2 to Tier 1 (gemini-3.5-flash-lite)...');
                     return this.generate('tier1', contents, options);
+                }
+                else if (tier === 'tier1' && modelName !== 'gemini-3.5-flash-lite') {
+                    console.warn('🔄 [AI Router] Failing over from Tier 1 to gemini-3.5-flash-lite...');
+                    return this.ai.models.generateContent({
+                        model: 'gemini-3.5-flash-lite',
+                        contents,
+                        config: {
+                            systemInstruction,
+                            temperature: options.temperature ?? 0.2,
+                            maxOutputTokens: options.maxOutputTokens
+                        }
+                    }).then(res => ({
+                        text: res.text || '',
+                        actualTier: 'tier1',
+                        modelUsed: 'gemini-3.5-flash-lite'
+                    }));
                 }
             }
             throw error;

@@ -65,9 +65,9 @@ export const config: AppConfig = {
   
   // Gemini AI Engine
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  modelTier1Router: process.env.MODEL_TIER1_ROUTER || 'gemini-2.0-flash-lite',
-  modelTier2Workhorse: process.env.MODEL_TIER2_WORKHORSE || 'gemini-2.5-flash',
-  modelTier3Deep: process.env.MODEL_TIER3_DEEP || 'gemini-2.5-pro',
+  modelTier1Router: process.env.MODEL_TIER1_ROUTER || 'gemini-3.5-flash-lite',
+  modelTier2Workhorse: process.env.MODEL_TIER2_WORKHORSE || 'gemini-3.8-flash',
+  modelTier3Deep: process.env.MODEL_TIER3_DEEP || 'gemini-3.8-flash',
   
   // Google Workspace
   googleCredentialsPath: path.resolve(process.cwd(), process.env.GOOGLE_CREDENTIALS_PATH || './credentials/google-credentials.json'),
