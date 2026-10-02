@@ -36,21 +36,33 @@ export class GoogleWorkspaceTools {
             return [];
         }
     }
-    static async createCalendarEvent(summary, startDateTime, endDateTime, description, attendees) {
+    static async createCalendarEvent(summary, startDateTime, endDateTime, description, attendees, includeMeet = true) {
         const calendar = await GoogleAuthManager.getCalendarClient();
+        const requestId = `meet-${Date.now()}`;
+        const requestBody = {
+            summary,
+            description,
+            start: { dateTime: startDateTime },
+            end: { dateTime: endDateTime },
+            attendees: attendees ? attendees.map(email => ({ email })) : undefined
+        };
+        if (includeMeet) {
+            requestBody.conferenceData = {
+                createRequest: {
+                    requestId,
+                    conferenceSolutionKey: { type: 'hangoutsMeet' }
+                }
+            };
+        }
         const res = await calendar.events.insert({
             calendarId: 'primary',
-            requestBody: {
-                summary,
-                description,
-                start: { dateTime: startDateTime },
-                end: { dateTime: endDateTime },
-                attendees: attendees ? attendees.map(email => ({ email })) : undefined
-            }
+            conferenceDataVersion: includeMeet ? 1 : 0,
+            requestBody
         });
         return {
             id: res.data.id || '',
-            htmlLink: res.data.htmlLink || ''
+            htmlLink: res.data.htmlLink || '',
+            meetLink: res.data.hangoutLink || res.data.conferenceData?.entryPoints?.[0]?.uri || undefined
         };
     }
     // ---------------------------------------------------------------------------
@@ -272,5 +284,74 @@ export class GoogleWorkspaceTools {
             docId,
             url: `https://docs.google.com/document/d/${docId}/edit`
         };
+    }
+    // ---------------------------------------------------------------------------
+    // Google Drive Search
+    // ---------------------------------------------------------------------------
+    static async searchDriveFiles(query, maxResults = 5) {
+        if (!GoogleAuthManager.isConfigured())
+            return [];
+        try {
+            const drive = await GoogleAuthManager.getDriveClient();
+            const clean = query.replace(/'/g, "\\'");
+            const res = await drive.files.list({
+                q: `name contains '${clean}' and trashed = false`,
+                fields: 'files(id, name, mimeType, webViewLink)',
+                pageSize: maxResults
+            });
+            return (res.data.files || []).map((f) => ({
+                id: f.id || '',
+                name: f.name || 'Untitled',
+                mimeType: f.mimeType || '',
+                webViewLink: f.webViewLink || undefined
+            }));
+        }
+        catch (err) {
+            console.warn('⚠️ Google Drive search failed:', err?.message || err);
+            return [];
+        }
+    }
+    // ---------------------------------------------------------------------------
+    // Gmail Search
+    // ---------------------------------------------------------------------------
+    static async searchEmails(query, maxResults = 5) {
+        if (!GoogleAuthManager.isConfigured())
+            return [];
+        try {
+            const gmail = await GoogleAuthManager.getGmailClient();
+            const res = await gmail.users.messages.list({
+                userId: 'me',
+                q: query,
+                maxResults
+            });
+            const messages = res.data.messages || [];
+            const digests = [];
+            for (const m of messages) {
+                if (!m.id)
+                    continue;
+                const detail = await gmail.users.messages.get({
+                    userId: 'me',
+                    id: m.id,
+                    format: 'metadata',
+                    metadataHeaders: ['From', 'Subject', 'Date']
+                });
+                const headers = detail.data.payload?.headers || [];
+                const fromHeader = headers.find((h) => h.name?.toLowerCase() === 'from')?.value || 'Unknown Sender';
+                const subjectHeader = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '(No Subject)';
+                const senderMatch = fromHeader.match(/^"?([^"<]+)"?\s*(?:<.*>)?$/);
+                const cleanSender = senderMatch ? senderMatch[1].trim() : fromHeader;
+                digests.push({
+                    id: m.id,
+                    sender: cleanSender,
+                    subject: subjectHeader,
+                    snippet: detail.data.snippet || ''
+                });
+            }
+            return digests;
+        }
+        catch (err) {
+            console.warn('⚠️ Gmail search query failed:', err?.message || err);
+            return [];
+        }
     }
 }

@@ -281,10 +281,11 @@ Return ONLY a valid JSON object matching this schema:
                             const created = await GoogleWorkspaceTools.createCalendarEvent(parsed.summary, parsed.startDateTime, parsed.endDateTime, parsed.description || undefined);
                             const startFormatted = new Date(parsed.startDateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
                             const dateFormatted = new Date(parsed.startDateTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                            const meetLine = created.meetLink ? `\n• **Google Meet:** ${created.meetLink}` : '';
                             const reply = `📅 *Meeting Scheduled in Google Calendar:*\n\n` +
                                 `• **Event:** ${parsed.summary}\n` +
-                                `• **When:** ${dateFormatted} at ${startFormatted}\n` +
-                                `• **Link:** ${created.htmlLink || 'Saved to Google Calendar'}\n\n— Zerubbabel`;
+                                `• **When:** ${dateFormatted} at ${startFormatted}${meetLine}\n` +
+                                `• **Calendar Link:** ${created.htmlLink || 'Saved to Google Calendar'}\n\n— Zerubbabel`;
                             await this.assistantSocket.sendMessage(replyJid, reply);
                             saveChatMessage('assistant', reply, 'tier1');
                             return;
@@ -294,6 +295,91 @@ Return ONLY a valid JSON object matching this schema:
                 catch (err) {
                     console.warn('Meeting parsing error:', err?.message || err);
                 }
+            }
+            // -----------------------------------------------------------------------
+            // 6.1 Google Drive File Search ("Search Drive for ...", "Find on Drive")
+            // -----------------------------------------------------------------------
+            const isDriveSearch = lower.startsWith('search drive') || lower.startsWith('find on drive') || lower.startsWith('find file') || lower.startsWith('search google drive');
+            if (isDriveSearch) {
+                console.log(`📁 [WhatsApp EA Direct] Searching Google Drive...`);
+                const query = trimmed.replace(/^(search google drive for|search google drive|search drive for|search drive|find on drive|find file)\s*/i, '').trim();
+                if (query) {
+                    const files = await GoogleWorkspaceTools.searchDriveFiles(query, 5);
+                    let reply = `📁 *Google Drive Search ("${query}"):*\n\n`;
+                    if (files.length === 0) {
+                        reply += `No files found matching "${query}" on your Google Drive.`;
+                    }
+                    else {
+                        reply += files.map((f, i) => `${i + 1}. *${f.name}*\n   🔗 ${f.webViewLink || 'In Google Drive'}`).join('\n\n');
+                    }
+                    await this.assistantSocket.sendMessage(replyJid, reply);
+                    saveChatMessage('assistant', reply, 'tier1');
+                    return;
+                }
+            }
+            // -----------------------------------------------------------------------
+            // 6.2 Gmail Inbox Check & Email Search ("Check emails", "Search emails")
+            // -----------------------------------------------------------------------
+            const isEmailQuery = lower === 'emails' || lower === 'check emails' || lower === 'check my email' || lower === 'check my emails' || lower === 'unread emails' || lower.startsWith('search email');
+            if (isEmailQuery) {
+                console.log(`📬 [WhatsApp EA Direct] Querying Gmail...`);
+                let q = 'is:unread -category:promotions -category:spam';
+                if (lower.startsWith('search email')) {
+                    q = trimmed.replace(/^search emails?\s*(for)?\s*/i, '').trim() || q;
+                }
+                const emails = await GoogleWorkspaceTools.searchEmails(q, 5);
+                let reply = `📬 *Executive Email Digest (Gmail):*\n\n`;
+                if (emails.length === 0) {
+                    reply += `No unread or matching emails found in your primary inbox.`;
+                }
+                else {
+                    reply += emails.map((e, i) => `${i + 1}. *From:* ${e.sender}\n   *Subject:* ${e.subject}\n   _${e.snippet.substring(0, 90)}..._`).join('\n\n');
+                }
+                await this.assistantSocket.sendMessage(replyJid, reply);
+                saveChatMessage('assistant', reply, 'tier1');
+                return;
+            }
+            // -----------------------------------------------------------------------
+            // 6.3 Google Docs Creation ("Create Google Doc titled ...")
+            // -----------------------------------------------------------------------
+            const isCreateDoc = lower.startsWith('create google doc') || lower.startsWith('create doc') || lower.startsWith('new google doc');
+            if (isCreateDoc) {
+                console.log(`📄 [WhatsApp EA Direct] Creating Google Doc...`);
+                const docPrompt = `Extract title and body content for a Google Doc from this instruction: "${trimmed}".
+Return ONLY JSON matching:
+{
+  "title": string,
+  "bodyText": string
+}`;
+                try {
+                    const res = await aiRouter.executeTask('intent_classification', docPrompt, { temperature: 0.1 });
+                    const jsonMatch = res.text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const parsed = JSON.parse(jsonMatch[0]);
+                        const title = parsed.title || 'Executive Document';
+                        const body = parsed.bodyText || '';
+                        const doc = await GoogleWorkspaceTools.createGoogleDoc(title, body);
+                        const reply = `📄 *Google Doc Created in Drive:*\n\n• **Title:** ${title}\n• **Link:** ${doc.url}\n\n— Zerubbabel`;
+                        await this.assistantSocket.sendMessage(replyJid, reply);
+                        saveChatMessage('assistant', reply, 'tier1');
+                        return;
+                    }
+                }
+                catch (docErr) {
+                    console.warn('Doc creation error:', docErr?.message || docErr);
+                }
+            }
+            // -----------------------------------------------------------------------
+            // 6.4 Google Contacts Sync ("Sync contacts", "Sync Google contacts")
+            // -----------------------------------------------------------------------
+            const isSyncContacts = lower === 'sync contacts' || lower === 'sync google contacts';
+            if (isSyncContacts) {
+                console.log(`👥 [WhatsApp EA Direct] Syncing Google Contacts...`);
+                const res = await GoogleWorkspaceTools.syncGoogleContacts();
+                const reply = `👥 *Google Contacts Synced:*\n\nSuccessfully synced ${res.syncedCount} contacts to local memory address book.\n\n— Zerubbabel`;
+                await this.assistantSocket.sendMessage(replyJid, reply);
+                saveChatMessage('assistant', reply, 'tier1');
+                return;
             }
             // -----------------------------------------------------------------------
             // 7. Grounded Morning Greeting ("Good morning", "Hello", "Hi")
