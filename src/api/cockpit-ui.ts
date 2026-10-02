@@ -7,6 +7,13 @@ export const renderCockpitHtml = (apiPort: number): string => `
   <title>Zerubbabel — Executive Cockpit</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#0b0f19">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Zerubbabel">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
   <style>
     :root {
       --bg: #0b0f19;
@@ -136,6 +143,7 @@ export const renderCockpitHtml = (apiPort: number): string => `
   <header>
     <div class="header-title">
       <span>🏛️</span> Zerubbabel
+      <button id="installAppBtn" onclick="installPwa()" style="display:none; margin-left:8px; padding:3px 10px; background:#2563eb; color:#fff; border:none; border-radius:12px; font-size:11px; font-weight:600; cursor:pointer;">📲 Install App</button>
     </div>
     <div class="status-badges">
       <div class="status-dot" id="socket1Badge"><span class="dot-green"></span> Observer</div>
@@ -495,6 +503,32 @@ export const renderCockpitHtml = (apiPort: number): string => `
     setInterval(updateStatus, 5000);
     updateStatus();
     loadDrafts();
+
+    // Service Worker Registration for Standalone PWA Mode
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+
+    let deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      const btn = document.getElementById('installAppBtn');
+      if (btn) btn.style.display = 'inline-flex';
+    });
+
+    window.installPwa = async function() {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      if (outcome === 'accepted') {
+        const btn = document.getElementById('installAppBtn');
+        if (btn) btn.style.display = 'none';
+      }
+      deferredInstallPrompt = null;
+    };
   </script>
 </body>
 </html>

@@ -11,6 +11,7 @@ import { aiRouter } from '../ai/router.js';
 import { GoogleAuthManager } from '../google/auth.js';
 import { DraftEngine } from '../services/draft-engine.js';
 import { renderCockpitHtml } from './cockpit-ui.js';
+import { generateAppIcon } from './icon-generator.js';
 export class ApiServer {
     app = express();
     server = createServer(this.app);
@@ -75,6 +76,58 @@ export class ApiServer {
         this.app.get(['/', '/cockpit'], (req, res) => {
             res.setHeader('Content-Type', 'text/html');
             res.send(renderCockpitHtml(config.port));
+        });
+        // 0.01 Web App Manifest for Android Chrome PWA Installation
+        this.app.get('/manifest.json', (req, res) => {
+            res.setHeader('Content-Type', 'application/manifest+json');
+            res.json({
+                name: 'Zerubbabel Executive Assistant',
+                short_name: 'Zerubbabel',
+                start_url: '/',
+                id: '/',
+                display: 'standalone',
+                background_color: '#0b0f19',
+                theme_color: '#0b0f19',
+                description: 'Autonomous AI Executive Assistant (Chief of Staff for Cephas)',
+                icons: [
+                    {
+                        src: '/icon-192.png',
+                        sizes: '192x192',
+                        type: 'image/png',
+                        purpose: 'any maskable'
+                    },
+                    {
+                        src: '/icon-512.png',
+                        sizes: '512x512',
+                        type: 'image/png',
+                        purpose: 'any maskable'
+                    }
+                ]
+            });
+        });
+        // 0.02 Service Worker for Native Android WebAPK / Standalone Installation
+        this.app.get('/sw.js', (req, res) => {
+            res.setHeader('Content-Type', 'application/javascript');
+            res.send(`
+self.addEventListener('install', (e) => self.skipWaiting());
+self.addEventListener('activate', (e) => clients.claim());
+self.addEventListener('fetch', (e) => {
+  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+});
+      `);
+        });
+        // 0.03 Dynamic High-Resolution App Icons (PNG)
+        const icon192 = generateAppIcon(192);
+        const icon512 = generateAppIcon(512);
+        this.app.get('/icon-192.png', (req, res) => {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.send(icon192);
+        });
+        this.app.get('/icon-512.png', (req, res) => {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.send(icon512);
         });
         // 0.1 Live Visual Pairing Dashboard (Laptop Browser / Mobile Web)
         this.app.get('/pair', (req, res) => {
