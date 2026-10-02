@@ -25,8 +25,48 @@ export interface GenerateOptions {
   tools?: any[];
 }
 
+/**
+ * Autonomous Multi-Model Switching Architecture
+ * Aggregates all high-quota Gemini models into cascading pools.
+ * When one model reaches rate/daily quota limits (429) or is busy (503),
+ * it automatically rotates to the next available model in real time.
+ */
+export const MODEL_POOLS: Record<ModelTier, string[]> = {
+  // Ultra-fast, high-throughput triage & intent classification
+  tier1: [
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash'
+  ],
+  // Executive workhorse for drafts, chat, and reasoning
+  tier2: [
+    'gemini-3.7-flash',
+    'gemini-3.8-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite'
+  ],
+  // Deep multimodal & strategic synthesis
+  tier3: [
+    'gemini-3.7-flash',
+    'gemini-3.8-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-3.5-flash-lite'
+  ]
+};
+
 export class ModelRouter {
   private ai: GoogleGenAI | null = null;
+  // Temporary cooldown timestamps for models that hit 429/503 limits (in ms)
+  private modelCooldowns: Map<string, number> = new Map();
 
   constructor() {
     if (config.geminiApiKey) {
@@ -64,17 +104,10 @@ export class ModelRouter {
   }
 
   /**
-   * Get model identifier for tier
+   * Get primary model identifier for tier
    */
   public getModelName(tier: ModelTier): string {
-    switch (tier) {
-      case 'tier1':
-        return config.modelTier1Router;
-      case 'tier2':
-        return config.modelTier2Workhorse;
-      case 'tier3':
-        return config.modelTier3Deep;
-    }
+    return MODEL_POOLS[tier][0];
   }
 
   /**
@@ -93,7 +126,24 @@ Key Operating Rules:
   }
 
   /**
-   * Execute prompt with specified tier and automatic failover
+   * Check if a model is currently in a cooldown window due to recent 429/503
+   */
+  private isModelCoolingDown(modelName: string): boolean {
+    const expiresAt = this.modelCooldowns.get(modelName);
+    if (!expiresAt) return false;
+    if (Date.now() > expiresAt) {
+      this.modelCooldowns.delete(modelName);
+      return false;
+    }
+    return true;
+  }
+
+  private setModelCooldown(modelName: string, durationMs = 60000) {
+    this.modelCooldowns.set(modelName, Date.now() + durationMs);
+  }
+
+  /**
+   * Execute prompt with intelligent multi-model cascade switching
    */
   public async generate(
     tier: ModelTier,
@@ -107,69 +157,84 @@ Key Operating Rules:
       this.ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
     }
 
-    const modelName = this.getModelName(tier);
     const systemInstruction = options.systemInstruction || this.getDefaultSystemPrompt();
+    const candidateModels = [...MODEL_POOLS[tier]];
 
-    try {
-      const response = await this.ai.models.generateContent({
-        model: modelName,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: options.temperature ?? (tier === 'tier1' ? 0.2 : 0.7),
-          maxOutputTokens: options.maxOutputTokens
-        }
-      });
+    // If preferred model is set in config, prioritize it at index 0
+    const preferredConfig = tier === 'tier1' ? config.modelTier1Router : (tier === 'tier2' ? config.modelTier2Workhorse : config.modelTier3Deep);
+    if (preferredConfig && !candidateModels.includes(preferredConfig)) {
+      candidateModels.unshift(preferredConfig);
+    }
 
-      return {
-        text: response.text || '',
-        actualTier: tier,
-        modelUsed: modelName
-      };
-    } catch (error: any) {
-      console.warn(`⚠️ [AI Router] Warning on ${tier} (${modelName}):`, error?.message || error);
+    // Sort: models not on cooldown first
+    const sortedCandidates = candidateModels.sort((a, b) => {
+      const aCool = this.isModelCoolingDown(a) ? 1 : 0;
+      const bCool = this.isModelCoolingDown(b) ? 1 : 0;
+      return aCool - bCool;
+    });
 
-      // Automatic failover logic on rate limit (429), server capacity (503), quota exceeded, or model not found (404)
-      const shouldFailover = 
-        error?.status === 429 || 
-        error?.status === 503 || 
-        error?.status === 404 ||
-        error?.message?.includes('429') || 
-        error?.message?.includes('503') || 
-        error?.message?.includes('404') ||
-        error?.message?.includes('not found') ||
-        error?.message?.includes('no longer available') ||
-        error?.message?.includes('RESOURCE_EXHAUSTED') || 
-        error?.message?.includes('UNAVAILABLE') || 
-        error?.message?.includes('high demand');
-      
-      if (shouldFailover) {
-        if (tier === 'tier3') {
-          console.warn('🔄 [AI Router] Failing over from Tier 3 to Tier 2 (gemini-3.8-flash)...');
-          return this.generate('tier2', contents, options);
-        } else if (tier === 'tier2') {
-          console.warn('🔄 [AI Router] Failing over from Tier 2 to Tier 1 (gemini-3.5-flash-lite)...');
-          return this.generate('tier1', contents, options);
-        } else if (tier === 'tier1' && modelName !== 'gemini-3.5-flash-lite') {
-          console.warn('🔄 [AI Router] Failing over from Tier 1 to gemini-3.5-flash-lite...');
-          return this.ai!.models.generateContent({
-            model: 'gemini-3.5-flash-lite',
-            contents,
-            config: {
-              systemInstruction,
-              temperature: options.temperature ?? 0.2,
-              maxOutputTokens: options.maxOutputTokens
-            }
-          }).then(res => ({
-            text: res.text || '',
-            actualTier: 'tier1',
-            modelUsed: 'gemini-3.5-flash-lite'
-          }));
-        }
+    let lastError: any = null;
+
+    // Try every candidate in the pool
+    for (const modelName of sortedCandidates) {
+      if (this.isModelCoolingDown(modelName)) {
+        console.warn(`⏳ [Multi-Model Switcher] Skipping ${modelName} (currently in cooldown).`);
+        continue;
       }
 
-      throw error;
+      try {
+        const response = await this.ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: options.temperature ?? (tier === 'tier1' ? 0.2 : 0.7),
+            maxOutputTokens: options.maxOutputTokens
+          }
+        });
+
+        return {
+          text: response.text || '',
+          actualTier: tier,
+          modelUsed: modelName
+        };
+      } catch (error: any) {
+        lastError = error;
+        const msg = error?.message || String(error);
+        const isQuotaOrBusy = 
+          error?.status === 429 || 
+          error?.status === 503 || 
+          error?.status === 404 ||
+          msg.includes('429') || 
+          msg.includes('503') || 
+          msg.includes('404') ||
+          msg.includes('RESOURCE_EXHAUSTED') || 
+          msg.includes('UNAVAILABLE') || 
+          msg.includes('high demand') ||
+          msg.includes('no longer available') ||
+          msg.includes('not found');
+
+        if (isQuotaOrBusy) {
+          // Put on 60 second cooldown so future calls skip this model instantly
+          this.setModelCooldown(modelName, 60000);
+          console.warn(`🔄 [Multi-Model Switcher] ${modelName} rate limited or unavailable (${error?.status || 'busy'}). Auto-switching to next candidate in pool...`);
+          continue; // Seamlessly try the next model
+        } else {
+          // If it's another non-quota error, still attempt failover
+          console.warn(`⚠️ [Multi-Model Switcher] Error on ${modelName}:`, msg);
+          this.setModelCooldown(modelName, 30000);
+          continue;
+        }
+      }
     }
+
+    // If entire tier pool was exhausted, cascade to alternative tier pools!
+    if (tier !== 'tier1') {
+      console.warn(`🔄 [Multi-Model Switcher] All models in ${tier} exhausted. Cascading down to tier1 pool...`);
+      return this.generate('tier1', contents, options);
+    }
+
+    throw lastError || new Error('All multi-model pool candidates currently rate-limited or unavailable.');
   }
 
   /**
@@ -182,6 +247,19 @@ Key Operating Rules:
   ): Promise<{ text: string; actualTier: ModelTier; modelUsed: string }> {
     const tier = this.resolveTierForTask(task);
     return this.generate(tier, prompt, options);
+  }
+
+  /**
+   * Return status of all model pools and active cooldowns
+   */
+  public getPoolStatus() {
+    return {
+      pools: MODEL_POOLS,
+      cooldowns: Array.from(this.modelCooldowns.entries()).map(([model, time]) => ({
+        model,
+        cooldownRemainingSeconds: Math.max(0, Math.ceil((time - Date.now()) / 1000))
+      }))
+    };
   }
 }
 

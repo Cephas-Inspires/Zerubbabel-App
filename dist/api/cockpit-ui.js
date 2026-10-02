@@ -352,6 +352,15 @@ export const renderCockpitHtml = (apiPort) => `
 
         if (data.reply) {
           botDiv.innerText = data.reply;
+          if (data.model) {
+            const badge = document.createElement('div');
+            badge.style.fontSize = '10px';
+            badge.style.color = '#60a5fa';
+            badge.style.marginTop = '6px';
+            badge.style.opacity = '0.85';
+            badge.innerText = '⚡ ' + data.model + ' (' + (data.tier || 'auto') + ')';
+            botDiv.appendChild(badge);
+          }
         } else if (data.error) {
           botDiv.innerText = '⚠️ Error: ' + data.error;
           botDiv.style.borderColor = '#ef4444';

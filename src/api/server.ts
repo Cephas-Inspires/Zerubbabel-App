@@ -339,6 +339,11 @@ self.addEventListener('fetch', (e) => {
       }
     });
 
+    // 2.1 Multi-Model Pool Live Health & Status
+    this.app.get('/api/ai/pool', (req: Request, res: Response) => {
+      res.json(aiRouter.getPoolStatus());
+    });
+
     // 3. Two-Stage Draft Queue
     this.app.get('/api/drafts', (req: Request, res: Response) => {
       const drafts = getPendingDrafts();

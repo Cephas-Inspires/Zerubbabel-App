@@ -300,6 +300,10 @@ self.addEventListener('fetch', (e) => {
                 res.status(500).json({ error: error.message || 'Failed to process executive chat message' });
             }
         });
+        // 2.1 Multi-Model Pool Live Health & Status
+        this.app.get('/api/ai/pool', (req, res) => {
+            res.json(aiRouter.getPoolStatus());
+        });
         // 3. Two-Stage Draft Queue
         this.app.get('/api/drafts', (req, res) => {
             const drafts = getPendingDrafts();
