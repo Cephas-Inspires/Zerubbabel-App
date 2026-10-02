@@ -548,7 +548,7 @@ self.addEventListener('fetch', (e) => {
       const clientInfo = creds.installed || creds.web;
       const { google } = await import('googleapis');
 
-      const redirectUri = `http://${req.headers.host || 'localhost:4892'}/auth/google/callback`;
+      const redirectUri = clientInfo.redirect_uris?.[0] || 'http://localhost:4892/auth/google/callback';
       const oAuth2Client = new google.auth.OAuth2(
         clientInfo.client_id,
         clientInfo.client_secret,
@@ -564,7 +564,8 @@ self.addEventListener('fetch', (e) => {
           'https://www.googleapis.com/auth/spreadsheets',
           'https://www.googleapis.com/auth/calendar',
           'https://www.googleapis.com/auth/tasks',
-          'https://www.googleapis.com/auth/contacts'
+          'https://www.googleapis.com/auth/contacts',
+          'https://www.googleapis.com/auth/gmail.readonly'
         ]
       });
 
@@ -581,7 +582,7 @@ self.addEventListener('fetch', (e) => {
         const clientInfo = creds.installed || creds.web;
         const { google } = await import('googleapis');
 
-        const redirectUri = `http://${req.headers.host || 'localhost:4892'}/auth/google/callback`;
+        const redirectUri = clientInfo.redirect_uris?.[0] || 'http://localhost:4892/auth/google/callback';
         const oAuth2Client = new google.auth.OAuth2(
           clientInfo.client_id,
           clientInfo.client_secret,

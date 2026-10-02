@@ -483,7 +483,7 @@ self.addEventListener('fetch', (e) => {
             const creds = JSON.parse(raw);
             const clientInfo = creds.installed || creds.web;
             const { google } = await import('googleapis');
-            const redirectUri = `http://${req.headers.host || 'localhost:4892'}/auth/google/callback`;
+            const redirectUri = clientInfo.redirect_uris?.[0] || 'http://localhost:4892/auth/google/callback';
             const oAuth2Client = new google.auth.OAuth2(clientInfo.client_id, clientInfo.client_secret, redirectUri);
             const authUrl = oAuth2Client.generateAuthUrl({
                 access_type: 'offline',
@@ -494,7 +494,8 @@ self.addEventListener('fetch', (e) => {
                     'https://www.googleapis.com/auth/spreadsheets',
                     'https://www.googleapis.com/auth/calendar',
                     'https://www.googleapis.com/auth/tasks',
-                    'https://www.googleapis.com/auth/contacts'
+                    'https://www.googleapis.com/auth/contacts',
+                    'https://www.googleapis.com/auth/gmail.readonly'
                 ]
             });
             res.redirect(authUrl);
@@ -508,7 +509,7 @@ self.addEventListener('fetch', (e) => {
                 const creds = JSON.parse(raw);
                 const clientInfo = creds.installed || creds.web;
                 const { google } = await import('googleapis');
-                const redirectUri = `http://${req.headers.host || 'localhost:4892'}/auth/google/callback`;
+                const redirectUri = clientInfo.redirect_uris?.[0] || 'http://localhost:4892/auth/google/callback';
                 const oAuth2Client = new google.auth.OAuth2(clientInfo.client_id, clientInfo.client_secret, redirectUri);
                 const { tokens } = await oAuth2Client.getToken(code);
                 fs.writeFileSync(config.googleTokenPath, JSON.stringify(tokens, null, 2), 'utf-8');

@@ -4,6 +4,8 @@ import { DraftEngine } from './draft-engine.js';
 import { aiRouter } from '../ai/router.js';
 import { config } from '../config/index.js';
 import { GoogleWorkspaceTools } from '../google/workspace-tools.js';
+import { GoogleAuthManager } from '../google/auth.js';
+import { ExecutiveSchedulerService } from './schedulers.js';
 import { 
   saveChatMessage, 
   getPendingDrafts, 
@@ -19,6 +21,7 @@ export class PersonalAssistantChatService {
   private assistantSocket: WhatsAppSocketManager;
   private personalSocket?: WhatsAppSocketManager;
   private draftEngine: DraftEngine;
+  private scheduler: ExecutiveSchedulerService;
   // Deduplicate messages processed within last 60 seconds
   private processedMsgIds = new Set<string>();
 
@@ -29,6 +32,7 @@ export class PersonalAssistantChatService {
     this.assistantSocket = assistantSocket;
     this.personalSocket = personalSocket;
     this.draftEngine = new DraftEngine(assistantSocket);
+    this.scheduler = new ExecutiveSchedulerService(assistantSocket);
     this.attachSockets();
   }
 
@@ -106,6 +110,12 @@ export class PersonalAssistantChatService {
     try {
       const lower = trimmed.toLowerCase();
       const today = new Date().toISOString().split('T')[0];
+      const todayDateFormatted = new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      });
 
       // -----------------------------------------------------------------------
       // 1. Quick Approvals & Cancellations ("SEND", "YES", "CANCEL", "ABORT")
@@ -140,7 +150,92 @@ export class PersonalAssistantChatService {
       }
 
       // -----------------------------------------------------------------------
-      // 2. Interactive Task Quick Commands ("Done 1", "Delete 2", "Add task ...")
+      // 2. On-Demand Morning Briefing ("Give me my briefing", "briefing")
+      // -----------------------------------------------------------------------
+      if (lower.includes('briefing') || lower === 'morning brief' || lower === 'daily brief') {
+        console.log(`☀️ [WhatsApp EA Direct] Generating live Morning Strategic Briefing...`);
+        const brief = await this.scheduler.runMorningBriefing();
+        await this.assistantSocket.sendMessage(replyJid, brief);
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // 3. Live Google Calendar Query ("What's on my calendar", "schedule", "agenda")
+      // -----------------------------------------------------------------------
+      if (
+        lower === 'calendar' || 
+        lower === 'schedule' || 
+        lower === 'agenda' || 
+        lower.includes('my calendar') || 
+        lower.includes('my schedule') || 
+        lower.includes('meetings today') ||
+        lower.includes('what do i have today')
+      ) {
+        console.log(`📅 [WhatsApp EA Direct] Fetching live Google Calendar events...`);
+        if (!GoogleAuthManager.isConfigured()) {
+          const reply = `📅 *Google Calendar:*\n\n` +
+            `Google Workspace is not connected yet. Please visit http://localhost:4892/auth/google on your browser to authorize access to your Google Calendar and Tasks.\n\n— Zerubbabel`;
+          await this.assistantSocket.sendMessage(replyJid, reply);
+          saveChatMessage('assistant', reply, 'tier1');
+          return;
+        }
+
+        const events = await GoogleWorkspaceTools.getTodayAgenda();
+        let reply = `📅 *Today's Google Calendar (${todayDateFormatted}):*\n\n`;
+        if (events.length === 0) {
+          reply += `• No meetings or events scheduled for today. Your calendar is clear.`;
+        } else {
+          reply += events.map(e => {
+            const time = e.start ? new Date(e.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'All-day';
+            const end = e.end ? ` – ${new Date(e.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}` : '';
+            return `• *${time}${end}*: ${e.summary}`;
+          }).join('\n');
+        }
+
+        await this.assistantSocket.sendMessage(replyJid, reply);
+        saveChatMessage('assistant', reply, 'tier1');
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // 4. Live Google Tasks Query ("Tasks", "My tasks", "To-do")
+      // -----------------------------------------------------------------------
+      if (
+        lower === 'tasks' || 
+        lower === 'my tasks' || 
+        lower === 'what are my tasks' || 
+        lower === 'todo' || 
+        lower === 'to-do' || 
+        lower === 'to do' ||
+        lower.includes('pending tasks')
+      ) {
+        console.log(`🎯 [WhatsApp EA Direct] Fetching live Google Tasks...`);
+        if (!GoogleAuthManager.isConfigured()) {
+          const reply = `🎯 *Google Tasks:*\n\n` +
+            `Google Workspace is not connected yet. Please visit http://localhost:4892/auth/google on your browser to authorize access.\n\n— Zerubbabel`;
+          await this.assistantSocket.sendMessage(replyJid, reply);
+          saveChatMessage('assistant', reply, 'tier1');
+          return;
+        }
+
+        const tasks = await GoogleWorkspaceTools.getTopTasks(10);
+        let reply = `🎯 *Your Active Google Tasks:*\n\n`;
+        if (tasks.length === 0) {
+          reply += `• All tasks completed! You have no pending items on your checklist.`;
+        } else {
+          reply += tasks.map((t, idx) => `${idx + 1}. [ ] ${t.title}`).join('\n');
+          reply += `\n\n───────────────────────────\n💬 *Quick Commands:*\n• Reply *"Done 1"* -> Marks task 1 complete\n• Reply *"Delete 2"* -> Prunes task 2\n• Reply *"Add [task] to tasks"* -> Creates a new task`;
+
+          setSetting('today_top_tasks', JSON.stringify(tasks.map((t, idx) => ({ index: idx + 1, id: t.id, title: t.title }))));
+        }
+
+        await this.assistantSocket.sendMessage(replyJid, reply);
+        saveChatMessage('assistant', reply, 'tier1');
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // 5. Interactive Task Quick Commands ("Done 1", "Delete 2", "Add task ...")
       // -----------------------------------------------------------------------
       const doneMatch = trimmed.match(/^(?:done|complete)\s*(\d+)$/i);
       if (doneMatch) {
@@ -211,7 +306,89 @@ export class PersonalAssistantChatService {
       }
 
       // -----------------------------------------------------------------------
-      // 3. Physical Replenishment Sentry ("Yes", "Eating now", "Snooze 30")
+      // 6. Schedule a Meeting on Google Calendar ("Schedule meeting ...")
+      // -----------------------------------------------------------------------
+      const isScheduleAsk = lower.startsWith('schedule meeting') || lower.startsWith('schedule a meeting') || lower.startsWith('book a meeting') || lower.startsWith('set up a meeting');
+      if (isScheduleAsk) {
+        console.log(`📅 [WhatsApp EA Direct] Parsing meeting scheduling request: "${trimmed}"`);
+        const parsePrompt = `Extract calendar event details from this user instruction: "${trimmed}"
+Current reference date & time: ${new Date().toISOString()} (Africa/Lagos, UTC+1).
+Return ONLY a valid JSON object matching this schema:
+{
+  "summary": string,
+  "startDateTime": string (ISO 8601 string, e.g. 2026-10-03T14:00:00+01:00),
+  "endDateTime": string (ISO 8601 string, default 45 mins after start),
+  "description": string | null
+}`;
+        try {
+          const res = await aiRouter.executeTask('intent_classification', parsePrompt, { temperature: 0.1 });
+          const jsonMatch = res.text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.summary && parsed.startDateTime && parsed.endDateTime) {
+              const created = await GoogleWorkspaceTools.createCalendarEvent(
+                parsed.summary,
+                parsed.startDateTime,
+                parsed.endDateTime,
+                parsed.description || undefined
+              );
+              const startFormatted = new Date(parsed.startDateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+              const dateFormatted = new Date(parsed.startDateTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+              const reply = `📅 *Meeting Scheduled in Google Calendar:*\n\n` +
+                `• **Event:** ${parsed.summary}\n` +
+                `• **When:** ${dateFormatted} at ${startFormatted}\n` +
+                `• **Link:** ${created.htmlLink || 'Saved to Google Calendar'}\n\n— Zerubbabel`;
+              await this.assistantSocket.sendMessage(replyJid, reply);
+              saveChatMessage('assistant', reply, 'tier1');
+              return;
+            }
+          }
+        } catch (err: any) {
+          console.warn('Meeting parsing error:', err?.message || err);
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // 7. Grounded Morning Greeting ("Good morning", "Hello", "Hi")
+      // -----------------------------------------------------------------------
+      if (
+        lower === 'good morning' || 
+        lower === 'good morning zerub' || 
+        lower === 'morning' || 
+        lower === 'hello' || 
+        lower === 'hi' ||
+        lower === 'hey'
+      ) {
+        let calendarSnapshot = '• Calendar: 0 scheduled meetings';
+        let tasksSnapshot = '• Tasks: 0 active priorities';
+
+        try {
+          if (GoogleAuthManager.isConfigured()) {
+            const agenda = await GoogleWorkspaceTools.getTodayAgenda();
+            calendarSnapshot = agenda.length > 0 
+              ? `• Calendar: ${agenda.length} scheduled meeting(s) today` 
+              : '• Calendar: 0 meetings scheduled today (Clear schedule)';
+
+            const tasks = await GoogleWorkspaceTools.getTopTasks(5);
+            tasksSnapshot = tasks.length > 0
+              ? `• Tasks: ${tasks.length} active priority item(s)`
+              : '• Tasks: All cleared';
+          }
+        } catch {}
+
+        const greeting = `🏛️ *Good morning, Cephas.* Zerubbabel online.\n\n` +
+          `Today is *${todayDateFormatted}*.\n` +
+          `${calendarSnapshot}\n` +
+          `${tasksSnapshot}\n\n` +
+          `Reply *"briefing"* for your full strategic morning briefing, or let me know what you want to execute today.`;
+
+        await this.assistantSocket.sendMessage(replyJid, greeting);
+        saveChatMessage('assistant', greeting, 'tier1');
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // 8. Physical Replenishment Sentry ("Yes", "Eating now", "Snooze 30")
       // -----------------------------------------------------------------------
       if (lower === 'eating now' || lower === 'had lunch' || (lower === 'yes' && !getPendingDrafts().length)) {
         upsertHabitLog('physical_replenishment', 'Midday Lunch', today, 'completed', 'Confirmed lunch & hydration');
@@ -236,7 +413,7 @@ export class PersonalAssistantChatService {
       }
 
       // -----------------------------------------------------------------------
-      // 4. Fitness & Movement Sentry ("Done", "Going now", "Rest day")
+      // 9. Fitness & Movement Sentry ("Done", "Going now", "Rest day")
       // -----------------------------------------------------------------------
       if (lower === 'going now' || lower === 'workout done' || lower === 'gym done' || lower === 'working out' || (lower === 'done' && !doneMatch)) {
         upsertHabitLog('fitness_workout', 'Evening Workout', today, 'completed', 'Physical movement completed');
@@ -255,7 +432,7 @@ export class PersonalAssistantChatService {
       }
 
       // -----------------------------------------------------------------------
-      // 5. Spiritual Grounding — Deep Contextual Dialogue (08:30 AM Routine)
+      // 10. Spiritual Grounding — Deep Contextual Dialogue (08:30 AM Routine)
       // -----------------------------------------------------------------------
       const biblePattern = /\b(genesis|exodus|leviticus|numbers|deuteronomy|joshua|judges|ruth|samuel|kings|chronicles|ezra|nehemiah|esther|job|psalm|psalms|proverb|proverbs|ecclesiastes|song of solomon|isaiah|jeremiah|lamentations|ezekiel|daniel|hosea|joel|amos|obadiah|jonah|micah|nahum|habakkuk|zephaniah|haggai|zechariah|malachi|matthew|mark|luke|john|acts|romans|corinthians|galatians|ephesians|philippians|colossians|thessalonians|timothy|titus|philemon|hebrews|james|peter|jude|revelation)\s*\d*/i;
 
@@ -282,7 +459,7 @@ Provide a high-level theological and strategic reflection:
       }
 
       // -----------------------------------------------------------------------
-      // 6. Mental Mastery — Strategic Reading Dialogue (03:30 PM Routine)
+      // 11. Mental Mastery — Strategic Reading Dialogue (03:30 PM Routine)
       // -----------------------------------------------------------------------
       const bookPattern = /\b(zero to one|good to great|atomic habits|deep work|principles|lean startup|thinking fast|chapter\s*\d+|reading\b|book\b)/i;
       if (bookPattern.test(trimmed) && (lower.includes('chapter') || lower.includes('by ') || lower.includes('thiel') || lower.includes('collins') || lower.includes('reading'))) {
@@ -307,7 +484,7 @@ Provide a strategic business & conceptual discussion:
       }
 
       // -----------------------------------------------------------------------
-      // 7. Cephas Finance Tracker — Natural Expense Logging (08:00 PM Routine)
+      // 12. Cephas Finance Tracker — Natural Expense Logging (08:00 PM Routine)
       // -----------------------------------------------------------------------
       const isExpenseLikely = 
         lower.includes('spent') || 
@@ -332,7 +509,7 @@ Provide a strategic business & conceptual discussion:
       }
 
       // -----------------------------------------------------------------------
-      // 8. Draft Engine / Intent Processing (Drafting messages to contacts)
+      // 13. Draft Engine / Intent Processing (Drafting messages to contacts)
       // -----------------------------------------------------------------------
       console.log(`🧠 [WhatsApp EA Direct] Evaluating executive intent...`);
       const draftResult = await this.draftEngine.processExecutiveInstruction(trimmed);
@@ -364,10 +541,16 @@ Provide a strategic business & conceptual discussion:
       }
 
       // -----------------------------------------------------------------------
-      // 9. Executive Reasoning & Strategic Chat (Cascading Gemini Engine)
+      // 14. Executive Reasoning & Strategic Chat (Grounded in Real Date & Reality)
       // -----------------------------------------------------------------------
       console.log(`🤖 [WhatsApp EA Direct] Synthesizing executive response via Gemini...`);
-      const aiResult = await aiRouter.executeTask('executive_chat', trimmed);
+      const groundedPrompt = `You are Zerubbabel, Chief of Staff to Cephas.
+Today is ${todayDateFormatted} (Lagos, Nigeria).
+STRICT OPERATING RULE: Do NOT invent fictional corporate projects (e.g. Andromeda Project, Sarah Chen, Q2 decks) or fake calendar meetings. If you do not have live calendar or task data, simply state that or address Cephas's question directly.
+
+User message: "${trimmed}"`;
+
+      const aiResult = await aiRouter.executeTask('executive_chat', groundedPrompt);
       const formattedReply = `${aiResult.text}\n\n_⚡ ${aiResult.modelUsed}_`;
       
       await this.assistantSocket.sendMessage(replyJid, formattedReply);
