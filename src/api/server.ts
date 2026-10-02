@@ -447,6 +447,16 @@ self.addEventListener('fetch', (e) => {
           titleHint
         );
         this.broadcast('NEW_MEETING', result);
+
+        // Send meeting debrief directly to Cephas's WhatsApp
+        const cephasJid = `${config.cephasPersonalPhone}@s.whatsapp.net`;
+        const summaryBullets = result.summaryBullets ? result.summaryBullets.map(b => `• ${b}`).join('\n') : (result.session.executive_summary || 'Minutes processed.');
+        const summaryMsg = `🎙️ *Executive Meeting Minutes: ${result.title}*\n\n` +
+          `${summaryBullets}\n\n` +
+          `📁 *Archive:* Local Database #${result.session.id}` +
+          (result.googleDocUrl ? `\n📄 *Google Doc:* ${result.googleDocUrl}` : '');
+        this.assistantSocket.sendMessage(cephasJid, summaryMsg).catch(() => {});
+
         res.json({ success: true, meeting: result });
       } catch (err: any) {
         console.error('Meeting audio processing error:', err);

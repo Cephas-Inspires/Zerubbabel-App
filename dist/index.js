@@ -3,6 +3,7 @@ import { getDatabase, setSetting } from './db/index.js';
 import { WhatsAppSocketManager } from './whatsapp/socket-manager.js';
 import { ApiServer } from './api/server.js';
 import { GroupIntelligenceService } from './services/group-intelligence.js';
+import { PersonalAssistantChatService } from './services/personal-assistant-chat.js';
 import { ExecutiveSchedulerService } from './services/schedulers.js';
 console.log('================================================================');
 console.log('🏛️  ZERUBBABEL — AUTONOMOUS AI EXECUTIVE ASSISTANT (CEPHAS EA)   ');
@@ -26,6 +27,9 @@ async function main() {
         // 4. Initialize Group Intelligence Service (Rolling 30-message buffer & @Zerub replies)
         const groupIntelligence = new GroupIntelligenceService(assistantSocket);
         console.log('👥 [Group Intelligence] Active: Listening for @Zerub mentions in all group chats.');
+        // 4.1 Initialize Personal WhatsApp Assistant Service (1-on-1 Direct Chat with Cephas)
+        const personalAssistant = new PersonalAssistantChatService(assistantSocket);
+        console.log('💬 [WhatsApp EA] Active: 1-on-1 Direct Chat with Cephas online.');
         // 5. Initialize Executive Schedulers & Sentry Routines
         const schedulers = new ExecutiveSchedulerService(assistantSocket);
         schedulers.startAllSchedulers();
