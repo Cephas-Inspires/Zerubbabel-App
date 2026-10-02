@@ -2,6 +2,9 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
 import { config } from '../config/index.js';
 import { 
   getPendingDrafts, 
@@ -20,6 +23,7 @@ import { WhatsAppSocketManager } from '../whatsapp/socket-manager.js';
 import { aiRouter } from '../ai/router.js';
 import { GoogleAuthManager } from '../google/auth.js';
 import { DraftEngine } from '../services/draft-engine.js';
+import { renderCockpitHtml } from './cockpit-ui.js';
 
 export class ApiServer {
   private app = express();
@@ -89,7 +93,13 @@ export class ApiServer {
   }
 
   private setupRoutes() {
-    // 0. Live Visual Pairing Dashboard (Laptop Browser / Mobile Web)
+    // 0. Dedicated Executive Mobile Cockpit App (PWA / Mobile UI)
+    this.app.get(['/', '/cockpit'], (req: Request, res: Response) => {
+      res.setHeader('Content-Type', 'text/html');
+      res.send(renderCockpitHtml(config.port));
+    });
+
+    // 0.1 Live Visual Pairing Dashboard (Laptop Browser / Mobile Web)
     this.app.get('/pair', (req: Request, res: Response) => {
       const s1 = this.personalSocket.getStatus();
       const s2 = this.assistantSocket.getStatus();
@@ -344,6 +354,43 @@ export class ApiServer {
       res.json({ meetings: getMeetingSessions(20) });
     });
 
+    // Meeting Ear: Audio upload & ingestion
+    const storage = multer.diskStorage({
+      destination: (req, file, cb) => {
+        const recDir = path.resolve(process.cwd(), './recordings');
+        if (!fs.existsSync(recDir)) fs.mkdirSync(recDir, { recursive: true });
+        cb(null, recDir);
+      },
+      filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        const ext = path.extname(file.originalname) || '.wav';
+        cb(null, `meeting-${uniqueSuffix}${ext}`);
+      }
+    });
+    const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+
+    this.app.post('/api/meetings/upload', upload.single('audio'), async (req: Request, res: Response) => {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No audio file uploaded.' });
+      }
+
+      const { meetingEar } = await import('../services/meeting-ear.js');
+      const titleHint = (req.body?.title as string) || 'Executive Meeting';
+
+      try {
+        const result = await meetingEar.processMeetingAudio(
+          req.file.path,
+          req.file.mimetype || 'audio/wav',
+          titleHint
+        );
+        this.broadcast('NEW_MEETING', result);
+        res.json({ success: true, meeting: result });
+      } catch (err: any) {
+        console.error('Meeting audio processing error:', err);
+        res.status(500).json({ error: err.message || 'Failed to process meeting audio.' });
+      }
+    });
+
     // 7. Cephas Finance Tracker
     this.app.get('/api/finances', (req: Request, res: Response) => {
       const monthYear = (req.query.month as string) || new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
@@ -371,6 +418,79 @@ export class ApiServer {
       const { financeTracker } = await import('../services/finance-tracker.js');
       const report = await financeTracker.generateWeeklyReport();
       res.json({ report });
+    });
+
+    // 8. One-Tap Google OAuth Consent & Callback
+    this.app.get('/auth/google', async (req: Request, res: Response) => {
+      if (!fs.existsSync(config.googleCredentialsPath)) {
+        return res.status(400).send(`
+          <div style="font-family: sans-serif; padding: 40px; background: #0b0f19; color: white;">
+            <h2>Google Setup Required</h2>
+            <p>Please place your Google OAuth Client ID file at <code>${config.googleCredentialsPath}</code>.</p>
+          </div>
+        `);
+      }
+
+      const raw = fs.readFileSync(config.googleCredentialsPath, 'utf-8');
+      const creds = JSON.parse(raw);
+      const clientInfo = creds.installed || creds.web;
+      const { google } = await import('googleapis');
+
+      const redirectUri = `http://${req.headers.host || 'localhost:4892'}/auth/google/callback`;
+      const oAuth2Client = new google.auth.OAuth2(
+        clientInfo.client_id,
+        clientInfo.client_secret,
+        redirectUri
+      );
+
+      const authUrl = oAuth2Client.generateAuthUrl({
+        access_type: 'offline',
+        prompt: 'consent',
+        scope: [
+          'https://www.googleapis.com/auth/drive',
+          'https://www.googleapis.com/auth/documents',
+          'https://www.googleapis.com/auth/spreadsheets',
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/tasks',
+          'https://www.googleapis.com/auth/contacts'
+        ]
+      });
+
+      res.redirect(authUrl);
+    });
+
+    this.app.get('/auth/google/callback', async (req: Request, res: Response) => {
+      const code = req.query.code as string;
+      if (!code) return res.status(400).send('No authorization code provided by Google.');
+
+      try {
+        const raw = fs.readFileSync(config.googleCredentialsPath, 'utf-8');
+        const creds = JSON.parse(raw);
+        const clientInfo = creds.installed || creds.web;
+        const { google } = await import('googleapis');
+
+        const redirectUri = `http://${req.headers.host || 'localhost:4892'}/auth/google/callback`;
+        const oAuth2Client = new google.auth.OAuth2(
+          clientInfo.client_id,
+          clientInfo.client_secret,
+          redirectUri
+        );
+
+        const { tokens } = await oAuth2Client.getToken(code);
+        fs.writeFileSync(config.googleTokenPath, JSON.stringify(tokens, null, 2), 'utf-8');
+
+        res.send(`
+          <html>
+            <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0b0f19; color: white;">
+              <h1 style="color: #4ade80;">🎉 Google Workspace Successfully Connected!</h1>
+              <p>Zerubbabel now has access to your Google Drive, Docs, Sheets, Calendar, Tasks, and Contacts.</p>
+              <p><a href="/" style="color: #60a5fa; text-decoration: underline;">Return to Zerubbabel Cockpit</a></p>
+            </body>
+          </html>
+        `);
+      } catch (err: any) {
+        res.status(500).send(`Authentication failed: ${err.message}`);
+      }
     });
   }
 

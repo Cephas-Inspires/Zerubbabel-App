@@ -13,6 +13,7 @@
     "test:draft": "tsx src/services/test-draft-engine.ts",
     "test:group": "tsx src/services/test-group-intelligence.ts",
     "test:step5": "tsx src/services/test-step5.ts",
+    "test:step6": "tsx src/services/test-step6.ts",
     "pair:personal": "tsx src/whatsapp/pair-personal.ts",
     "pair:assistant": "tsx src/whatsapp/pair-assistant.ts"
   },
@@ -34,6 +35,7 @@
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
     "googleapis": "^182.0.0",
+    "multer": "^2.4.0",
     "node-cron": "^4.6.0",
     "pino": "^10.3.1",
     "qrcode": "^1.5.4",
@@ -44,6 +46,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
     "@types/node": "^26.6.4",
     "@types/node-cron": "^3.0.11",
     "@types/qrcode": "^1.5.6",
