@@ -7,7 +7,10 @@ import {
   type ConnectionState
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import qrcode from 'qrcode-terminal';
+import qrcodeTerminal from 'qrcode-terminal';
+import QRCode from 'qrcode';
+import path from 'node:path';
+import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { config } from '../config/index.js';
 import { 
@@ -29,6 +32,7 @@ export class WhatsAppSocketManager extends EventEmitter {
   private socket: WASocket | null = null;
   private status: SocketConnectionStatus = 'disconnected';
   private qrCodeString: string | undefined;
+  private qrDataUrlString: string | undefined;
   private pairingCodeString: string | undefined;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
@@ -46,6 +50,7 @@ export class WhatsAppSocketManager extends EventEmitter {
       phone: this.phone,
       status: this.status,
       qrCode: this.qrCodeString,
+      qrDataUrl: this.qrDataUrlString,
       pairingCode: this.pairingCodeString,
       userJid: this.socket?.user?.id,
       lastConnectedAt: this.status === 'connected' ? new Date().toISOString() : undefined
@@ -93,21 +98,35 @@ export class WhatsAppSocketManager extends EventEmitter {
     }
 
     // Connection state changes
-    this.socket.ev.on('connection.update', (update: Partial<ConnectionState>) => {
+    this.socket.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
         this.qrCodeString = qr;
         this.status = 'qr_ready';
+        
+        try {
+          this.qrDataUrlString = await QRCode.toDataURL(qr, { margin: 2, scale: 8 });
+          const qrFilePath = path.resolve(process.cwd(), `./data/qr-${this.role}.png`);
+          await QRCode.toFile(qrFilePath, qr, { margin: 2, scale: 8 });
+          console.log(`🖼️ [WhatsApp QR] High-res QR image saved to: ${qrFilePath}`);
+        } catch (imgErr) {
+          // ignore QR image generation fallback
+        }
+
         console.log(`\n📷 [WhatsApp QR] Scan with phone for [${this.role.toUpperCase()} - +${this.phone}]:`);
-        qrcode.generate(qr, { small: true });
+        qrcodeTerminal.generate(qr, { small: true });
         this.emit('status', this.getStatus());
       }
 
       if (connection === 'open') {
-        console.log(`✅ [WhatsApp ${this.role}] Connected successfully! (JID: ${this.socket?.user?.id})`);
+        console.log(`\n======================================================`);
+        console.log(`✅ [WhatsApp ${this.role.toUpperCase()}] Connected successfully!`);
+        console.log(`📱 Account JID: ${this.socket?.user?.id}`);
+        console.log(`======================================================\n`);
         this.status = 'connected';
         this.qrCodeString = undefined;
+        this.qrDataUrlString = undefined;
         this.pairingCodeString = undefined;
         this.reconnectAttempts = 0;
         this.emit('status', this.getStatus());

@@ -23,6 +23,7 @@ async function main() {
       config.cephasPersonalPhone,
       config.authDirPersonal
     );
+    await personalSocket.start();
 
     // 3. Initialize WhatsApp Socket 2 (Assistant SIM)
     console.log('🤖 [3/4] Initializing Socket 2: Assistant SIM (+2347051627659)...');
@@ -31,6 +32,7 @@ async function main() {
       config.zerubAssistantPhone,
       config.authDirAssistant
     );
+    await assistantSocket.start();
 
     // 4. Start Local API & WebSocket Server
     console.log('🌐 [4/4] Starting Local Executive API & IPC Server...');

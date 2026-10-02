@@ -85,6 +85,100 @@ export class ApiServer {
   }
 
   private setupRoutes() {
+    // 0. Live Visual Pairing Dashboard (Laptop Browser / Mobile Web)
+    this.app.get('/pair', (req: Request, res: Response) => {
+      const s1 = this.personalSocket.getStatus();
+      const s2 = this.assistantSocket.getStatus();
+
+      res.setHeader('Content-Type', 'text/html');
+      res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zerubbabel — Dual WhatsApp Pairing Console</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f3f4f6; margin: 0; padding: 24px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { color: #60a5fa; margin-bottom: 8px; }
+    p.subtitle { color: #9ca3af; margin-top: 0; margin-bottom: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: #1f2937; border-radius: 12px; padding: 20px; border: 1px solid #374151; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: bold; margin-bottom: 12px; }
+    .badge-connecting { background: #ca8a04; color: #fff; }
+    .badge-qr { background: #2563eb; color: #fff; }
+    .badge-connected { background: #16a34a; color: #fff; }
+    .badge-disconnected { background: #dc2626; color: #fff; }
+    .qr-box { background: white; padding: 16px; border-radius: 8px; display: flex; justify-content: center; align-items: center; margin: 16px 0; min-height: 260px; }
+    .qr-box img { max-width: 250px; height: auto; }
+    .info { font-size: 14px; color: #d1d5db; line-height: 1.5; }
+    ol { margin: 8px 0; padding-left: 20px; font-size: 13px; color: #9ca3af; }
+  </style>
+  <script>
+    // Auto refresh every 3 seconds until both connected
+    setTimeout(() => location.reload(), 3000);
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1>🏛️ Zerubbabel WhatsApp Pairing Console</h1>
+    <p class="subtitle">100% Phone-Hosted Autonomous AI Assistant • Dual WhatsApp Engine</p>
+    
+    <div class="grid">
+      <!-- Socket 1: Personal WhatsApp -->
+      <div class="card">
+        <h3>📱 Socket 1: Personal Observer</h3>
+        <p class="info">Target: <strong>+${s1.phone}</strong> (Cephas Personal)</p>
+        <span class="badge badge-${s1.status === 'connected' ? 'connected' : (s1.status === 'qr_ready' ? 'qr' : 'connecting')}">
+          STATUS: ${s1.status.toUpperCase()}
+        </span>
+        
+        <div class="qr-box">
+          ${s1.status === 'connected' 
+            ? '<h3 style="color: #16a34a;">✅ Connected & Observing!</h3>'
+            : (s1.qrDataUrl 
+                ? '<img src="' + s1.qrDataUrl + '" alt="Socket 1 QR Code" />' 
+                : '<p style="color:#6b7280;">Generating QR code...</p>')}
+        </div>
+
+        <ol>
+          <li>Open WhatsApp on personal phone (<strong>+${s1.phone}</strong>)</li>
+          <li>Tap <strong>Settings / ⋮</strong> &gt; <strong>Linked Devices</strong></li>
+          <li>Tap <strong>Link a Device</strong> &amp; point camera at the QR code</li>
+        </ol>
+      </div>
+
+      <!-- Socket 2: Assistant SIM -->
+      <div class="card">
+        <h3>🤖 Socket 2: Assistant SIM</h3>
+        <p class="info">Target: <strong>+${s2.phone}</strong> (Zerubbabel SIM)</p>
+        <span class="badge badge-${s2.status === 'connected' ? 'connected' : (s2.status === 'qr_ready' ? 'qr' : 'connecting')}">
+          STATUS: ${s2.status.toUpperCase()}
+        </span>
+        
+        <div class="qr-box">
+          ${s2.status === 'connected' 
+            ? '<h3 style="color: #16a34a;">✅ Connected & Ready!</h3>'
+            : (s2.qrDataUrl 
+                ? '<img src="' + s2.qrDataUrl + '" alt="Socket 2 QR Code" />' 
+                : '<p style="color:#6b7280;">Generating QR code...</p>')}
+        </div>
+
+        <ol>
+          <li>Open WhatsApp on assistant line (<strong>+${s2.phone}</strong>)</li>
+          <li>Tap <strong>Settings / ⋮</strong> &gt; <strong>Linked Devices</strong></li>
+          <li>Tap <strong>Link a Device</strong> &amp; point camera at the QR code</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+      `);
+    });
+
     // 1. Overall System Health & Status
     this.app.get('/api/status', (req: Request, res: Response) => {
       res.json({

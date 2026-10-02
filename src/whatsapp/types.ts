@@ -13,6 +13,7 @@ export interface SocketStatusPayload {
   phone: string;
   status: SocketConnectionStatus;
   qrCode?: string;
+  qrDataUrl?: string;
   pairingCode?: string;
   userJid?: string;
   lastConnectedAt?: string;
