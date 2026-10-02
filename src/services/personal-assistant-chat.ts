@@ -24,8 +24,14 @@ export class PersonalAssistantChatService {
       const normalizedSender = (event.senderPhone || '').replace(/\D/g, '');
       const normalizedCephas = config.cephasPersonalPhone.replace(/\D/g, '');
 
-      if (normalizedSender !== normalizedCephas) {
-        // If someone else DMs Zerubbabel directly, stranger screening handles it
+      // Match exact phone, national format (last 10 digits), or JID inclusion
+      const isCephas = 
+        normalizedSender === normalizedCephas ||
+        (normalizedCephas.length >= 10 && normalizedSender.endsWith(normalizedCephas.slice(-10))) ||
+        event.senderJid.includes(normalizedCephas);
+
+      if (!isCephas) {
+        console.log(`[WhatsApp EA] Ignoring 1-on-1 direct message from non-Cephas sender: ${event.senderPhone} (Target Cephas: ${config.cephasPersonalPhone})`);
         return;
       }
 

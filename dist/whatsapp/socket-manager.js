@@ -131,10 +131,16 @@ export class WhatsAppSocketManager extends EventEmitter {
                 if (!msg.message)
                     continue;
                 const isFromMe = msg.key.fromMe || false;
+                // Ignore outbound messages dispatched by the assistant socket itself
+                if (this.role === 'assistant_dispatcher' && isFromMe) {
+                    continue;
+                }
                 const remoteJid = msg.key.remoteJid || '';
                 const isGroup = remoteJid.endsWith('@g.us');
                 const participantJid = isGroup ? (msg.key.participant || '') : remoteJid;
-                const senderPhone = participantJid.replace(/@.*$/, '').replace(/\D/g, '');
+                // Cleanly strip multi-device suffix (:41, :18, etc.) and domain
+                const cleanJid = participantJid.split('@')[0].split(':')[0];
+                const senderPhone = cleanJid.replace(/\D/g, '');
                 const senderName = msg.pushName || null;
                 // Extract text content
                 const text = msg.message.conversation ||

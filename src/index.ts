@@ -57,6 +57,35 @@ async function main() {
     });
     await apiServer.listen(config.port, config.host);
 
+    // 7. Automatic Startup Test Confirmation sent directly to Cephas's WhatsApp
+    const sendStartupTestMessage = async () => {
+      try {
+        const cephasJid = `${config.cephasPersonalPhone}@s.whatsapp.net`;
+        const testGreeting = `🏛️ *Zerubbabel Chief of Staff is Online*\n\n` +
+          `Good day, Cephas. Daemon has initialized successfully on your phone.\n\n` +
+          `• 📱 *Dual WhatsApp:* Observer (+${config.cephasPersonalPhone}) & Assistant SIM (+${config.zerubAssistantPhone})\n` +
+          `• ⏰ *Executive Schedulers:* All 8 daily sentry check-ins active\n` +
+          `• 🧠 *AI Engine:* Multi-Model Switcher pooled across 10+ models\n` +
+          `• 🎙️ *Meeting Ear:* Web recorder ready at http://localhost:4892\n\n` +
+          `_Reply directly to this chat with any directive, expense, or draft instruction._`;
+        
+        await assistantSocket.sendMessage(cephasJid, testGreeting);
+        console.log(`📡 [Startup Test] Live startup confirmation message sent to Cephas (+${config.cephasPersonalPhone}).`);
+      } catch (err: any) {
+        console.warn(`⚠️ [Startup Test] Could not dispatch startup test ping yet: ${err.message}`);
+      }
+    };
+
+    if (assistantSocket.getStatus().status === 'connected') {
+      setTimeout(sendStartupTestMessage, 2000);
+    } else {
+      assistantSocket.on('status', (st) => {
+        if (st.status === 'connected') {
+          setTimeout(sendStartupTestMessage, 2000);
+        }
+      });
+    }
+
     console.log('\n🟢 Zerubbabel Daemon successfully initialized and running.');
     console.log('👉 To pair Socket 1: npm run pair:personal');
     console.log('👉 To pair Socket 2: npm run pair:assistant\n');
