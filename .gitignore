@@ -2,8 +2,7 @@
 node_modules/
 package-lock.json
 
-# Builds
-dist/
+# Builds (dist is committed for phone-native zero-compile runs)
 build/
 .next/
 out/
