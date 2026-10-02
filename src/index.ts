@@ -2,6 +2,7 @@ import { config } from './config/index.js';
 import { getDatabase, setSetting } from './db/index.js';
 import { WhatsAppSocketManager } from './whatsapp/socket-manager.js';
 import { ApiServer } from './api/server.js';
+import { GroupIntelligenceService } from './services/group-intelligence.js';
 
 console.log('================================================================');
 console.log('🏛️  ZERUBBABEL — AUTONOMOUS AI EXECUTIVE ASSISTANT (CEPHAS EA)   ');
@@ -34,8 +35,12 @@ async function main() {
     );
     await assistantSocket.start();
 
-    // 4. Start Local API & WebSocket Server
-    console.log('🌐 [4/4] Starting Local Executive API & IPC Server...');
+    // 4. Initialize Group Intelligence Service (Rolling 30-message buffer & @Zerub replies)
+    const groupIntelligence = new GroupIntelligenceService(assistantSocket);
+    console.log('👥 [Group Intelligence] Active: Listening for @Zerub mentions in all group chats.');
+
+    // 5. Start Local API & WebSocket Server
+    console.log('🌐 [5/5] Starting Local Executive API & IPC Server...');
     const apiServer = new ApiServer(personalSocket, assistantSocket);
     await apiServer.listen(config.port, config.host);
 
