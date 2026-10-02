@@ -3,6 +3,7 @@ import { getDatabase, setSetting } from './db/index.js';
 import { WhatsAppSocketManager } from './whatsapp/socket-manager.js';
 import { ApiServer } from './api/server.js';
 import { GroupIntelligenceService } from './services/group-intelligence.js';
+import { ExecutiveSchedulerService } from './services/schedulers.js';
 
 console.log('================================================================');
 console.log('🏛️  ZERUBBABEL — AUTONOMOUS AI EXECUTIVE ASSISTANT (CEPHAS EA)   ');
@@ -39,9 +40,16 @@ async function main() {
     const groupIntelligence = new GroupIntelligenceService(assistantSocket);
     console.log('👥 [Group Intelligence] Active: Listening for @Zerub mentions in all group chats.');
 
-    // 5. Start Local API & WebSocket Server
-    console.log('🌐 [5/5] Starting Local Executive API & IPC Server...');
+    // 5. Initialize Executive Schedulers & Sentry Routines
+    const schedulers = new ExecutiveSchedulerService(assistantSocket);
+    schedulers.startAllSchedulers();
+
+    // 6. Start Local API & WebSocket Server
+    console.log('🌐 [6/6] Starting Local Executive API & IPC Server...');
     const apiServer = new ApiServer(personalSocket, assistantSocket);
+    schedulers.onNotification((title, message) => {
+      apiServer.broadcast('EXECUTIVE_NOTIFICATION', { title, message });
+    });
     await apiServer.listen(config.port, config.host);
 
     console.log('\n🟢 Zerubbabel Daemon successfully initialized and running.');

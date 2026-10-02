@@ -28,6 +28,7 @@ export class GoogleAuthManager {
         scopes: [
           'https://www.googleapis.com/auth/drive',
           'https://www.googleapis.com/auth/documents',
+          'https://www.googleapis.com/auth/spreadsheets',
           'https://www.googleapis.com/auth/calendar',
           'https://www.googleapis.com/auth/tasks',
           'https://www.googleapis.com/auth/contacts'
@@ -62,6 +63,11 @@ export class GoogleAuthManager {
   public static async getDocsClient() {
     const auth = await this.getAuthClient();
     return google.docs({ version: 'v1', auth });
+  }
+
+  public static async getSheetsClient() {
+    const auth = await this.getAuthClient();
+    return google.sheets({ version: 'v4', auth });
   }
 
   public static async getCalendarClient() {

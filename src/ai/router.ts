@@ -129,10 +129,17 @@ Key Operating Rules:
     } catch (error: any) {
       console.warn(`⚠️ [AI Router] Warning on ${tier} (${modelName}):`, error?.message || error);
 
-      // Automatic failover logic on rate limit (429) or quota exceeded
-      const isRateLimit = error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED');
+      // Automatic failover logic on rate limit (429), server capacity (503), or quota exceeded
+      const shouldFailover = 
+        error?.status === 429 || 
+        error?.status === 503 || 
+        error?.message?.includes('429') || 
+        error?.message?.includes('503') || 
+        error?.message?.includes('RESOURCE_EXHAUSTED') || 
+        error?.message?.includes('UNAVAILABLE') || 
+        error?.message?.includes('high demand');
       
-      if (isRateLimit) {
+      if (shouldFailover) {
         if (tier === 'tier3') {
           console.warn('🔄 [AI Router] Failing over from Tier 3 to Tier 2 (Workhorse)...');
           return this.generate('tier2', contents, options);

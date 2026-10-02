@@ -12,6 +12,7 @@
     "test:ai": "tsx src/ai/test-ai.ts",
     "test:draft": "tsx src/services/test-draft-engine.ts",
     "test:group": "tsx src/services/test-group-intelligence.ts",
+    "test:step5": "tsx src/services/test-step5.ts",
     "pair:personal": "tsx src/whatsapp/pair-personal.ts",
     "pair:assistant": "tsx src/whatsapp/pair-assistant.ts"
   },

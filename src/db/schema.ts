@@ -92,4 +92,21 @@ CREATE TABLE IF NOT EXISTS system_settings (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- 8. Cephas Finance Tracker Logs (Offline Resilience & Fast Local Analytics)
+CREATE TABLE IF NOT EXISTS finance_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL, -- YYYY-MM-DD
+  month_year TEXT NOT NULL, -- e.g. "October 2026"
+  item TEXT NOT NULL,
+  category TEXT NOT NULL,
+  amount REAL NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'NGN',
+  notes TEXT,
+  google_sheet_synced INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_date ON finance_logs(date);
+CREATE INDEX IF NOT EXISTS idx_finance_month_year ON finance_logs(month_year);
 `;

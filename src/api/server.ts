@@ -13,7 +13,8 @@ import {
   upsertHabitLog, 
   saveChatMessage, 
   getRecentChatHistory, 
-  getMeetingSessions 
+  getMeetingSessions,
+  getExpensesForMonth
 } from '../db/index.js';
 import { WhatsAppSocketManager } from '../whatsapp/socket-manager.js';
 import { aiRouter } from '../ai/router.js';
@@ -341,6 +342,35 @@ export class ApiServer {
     // 6. Meetings
     this.app.get('/api/meetings', (req: Request, res: Response) => {
       res.json({ meetings: getMeetingSessions(20) });
+    });
+
+    // 7. Cephas Finance Tracker
+    this.app.get('/api/finances', (req: Request, res: Response) => {
+      const monthYear = (req.query.month as string) || new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      const expenses = getExpensesForMonth(monthYear);
+      res.json({ monthYear, expenses });
+    });
+
+    this.app.post('/api/finances', async (req: Request, res: Response) => {
+      const { text, items } = req.body;
+      const { financeTracker } = await import('../services/finance-tracker.js');
+
+      if (items && Array.isArray(items)) {
+        const result = await financeTracker.logExpenses(items);
+        return res.json(result);
+      } else if (text && typeof text === 'string') {
+        const parsed = await financeTracker.parseExpenses(text);
+        const result = await financeTracker.logExpenses(parsed);
+        return res.json(result);
+      }
+
+      res.status(400).json({ error: 'Either "text" or "items" array is required.' });
+    });
+
+    this.app.get('/api/finances/weekly-report', async (req: Request, res: Response) => {
+      const { financeTracker } = await import('../services/finance-tracker.js');
+      const report = await financeTracker.generateWeeklyReport();
+      res.json({ report });
     });
   }
 

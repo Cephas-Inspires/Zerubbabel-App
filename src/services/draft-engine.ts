@@ -66,6 +66,27 @@ export class DraftEngine {
       }
     }
 
+    // 1.5 Check if this is a financial expense log (e.g. "Spent 15k on fuel...", "Paid 4500 for lunch...")
+    const lower = trimmed.toLowerCase();
+    const isExpenseLikely = 
+      lower.includes('spent') || 
+      lower.includes('expense') || 
+      lower.includes('paid ') || 
+      lower.includes('bought') || 
+      lower.includes('cost');
+
+    if (isExpenseLikely) {
+      const { financeTracker } = await import('./finance-tracker.js');
+      const parsedExpenses = await financeTracker.parseExpenses(trimmed);
+      if (parsedExpenses.length > 0) {
+        const logResult = await financeTracker.logExpenses(parsedExpenses);
+        return {
+          type: 'chat_reply',
+          replyText: logResult.summaryText
+        };
+      }
+    }
+
     // 2. Classify intent via Tier 1 (Flash-Lite: sub-second intent extraction)
     const triagePrompt = `You are a high-speed intent extraction engine for executive instructions.
 Analyze the user's message and determine if they want to send/tell/draft a message to a person or client.

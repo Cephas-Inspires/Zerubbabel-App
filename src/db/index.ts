@@ -369,3 +369,70 @@ export const getSetting = (key: string): string | null => {
   const row = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row ? row.value : null;
 };
+
+// -----------------------------------------------------------------------------
+// Cephas Finance Tracker DAO
+// -----------------------------------------------------------------------------
+export interface FinanceRecord {
+  id?: number;
+  date: string;
+  month_year: string;
+  item: string;
+  category: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  google_sheet_synced: number;
+  created_at?: string;
+}
+
+export const logExpense = (
+  date: string,
+  monthYear: string,
+  item: string,
+  category: string,
+  amount: number,
+  currency = 'NGN',
+  notes: string | null = null,
+  synced = false
+): FinanceRecord => {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const info = db.prepare(`
+    INSERT INTO finance_logs (date, month_year, item, category, amount, currency, notes, google_sheet_synced, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(date, monthYear, item, category, amount, currency.toUpperCase(), notes, synced ? 1 : 0, now);
+
+  return {
+    id: Number(info.lastInsertRowid),
+    date,
+    month_year: monthYear,
+    item,
+    category,
+    amount,
+    currency: currency.toUpperCase(),
+    notes,
+    google_sheet_synced: synced ? 1 : 0,
+    created_at: now
+  };
+};
+
+export const getExpensesForRange = (startDate: string, endDate: string): FinanceRecord[] => {
+  const db = getDatabase();
+  return db
+    .prepare('SELECT * FROM finance_logs WHERE date >= ? AND date <= ? ORDER BY date DESC, id DESC')
+    .all(startDate, endDate) as FinanceRecord[];
+};
+
+export const getExpensesForMonth = (monthYear: string): FinanceRecord[] => {
+  const db = getDatabase();
+  return db
+    .prepare('SELECT * FROM finance_logs WHERE month_year = ? ORDER BY date DESC, id DESC')
+    .all(monthYear) as FinanceRecord[];
+};
+
+export const markExpenseSynced = (id: number): void => {
+  const db = getDatabase();
+  db.prepare('UPDATE finance_logs SET google_sheet_synced = 1 WHERE id = ?').run(id);
+};
+
