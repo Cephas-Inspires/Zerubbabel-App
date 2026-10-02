@@ -1,7 +1,6 @@
 import cron from 'node-cron';
-import { aiRouter } from '../ai/router.js';
 import { GoogleWorkspaceTools } from '../google/workspace-tools.js';
-import { upsertHabitLog, saveChatMessage } from '../db/index.js';
+import { upsertHabitLog, saveChatMessage, getHabitScoreForDate, setSetting } from '../db/index.js';
 import { financeTracker } from './finance-tracker.js';
 import { config } from '../config/index.js';
 export class ExecutiveSchedulerService {
@@ -19,118 +18,248 @@ export class ExecutiveSchedulerService {
         this.onNotificationCallback = cb;
     }
     startAllSchedulers() {
-        console.log('⏰ [Executive Schedulers] Initializing 7 executive sentry routines...');
+        console.log('⏰ [Executive Schedulers] Initializing 8 executive routines (Africa/Lagos)...');
+        const cronOptions = { timezone: 'Africa/Lagos' };
         // 1. 08:00 AM - Morning Strategic Briefing
         cron.schedule('0 8 * * *', async () => {
-            console.log('⏰ Triggering 08:00 AM Morning Strategic Briefing...');
+            console.log('⏰ [Scheduler] Triggering 08:00 AM Morning Strategic Briefing...');
             await this.runMorningBriefing();
-        });
+        }, cronOptions);
         // 2. 08:30 AM - Spiritual Grounding
         cron.schedule('30 8 * * *', async () => {
-            console.log('⏰ Triggering 08:30 AM Spiritual Grounding...');
-            await this.dispatchPrompt('spiritual_grounding', 'Spiritual Grounding & Focus', '☀️ **Spiritual Grounding (8:30 AM):**\n\nCephas, take 15 minutes for Scripture reading, prayer, and mental centering before diving into operational execution.\n\n_“Commit your work to the Lord, and your plans will be established.” (Proverbs 16:3)_');
-        });
-        // 3. 01:00 PM - Physical Replenishment (Lunch & Screen Break)
+            console.log('⏰ [Scheduler] Triggering 08:30 AM Spiritual Grounding...');
+            await this.runSpiritualGrounding();
+        }, cronOptions);
+        // 3. 01:00 PM - Physical Replenishment (Midday Reset)
         cron.schedule('0 13 * * *', async () => {
-            console.log('⏰ Triggering 01:00 PM Physical Replenishment...');
-            await this.dispatchPrompt('physical_replenishment', 'Physical Replenishment', '🥗 **Physical Replenishment (1:00 PM):**\n\nMidday pause: Step away from screens, nourish your body with lunch, and take 5 deep breaths to reset mental energy for the afternoon.');
-        });
-        // 4. 03:30 PM - Mental Mastery (Reading & Learning)
+            console.log('⏰ [Scheduler] Triggering 01:00 PM Physical Replenishment...');
+            await this.runPhysicalReplenishment();
+        }, cronOptions);
+        // 4. 03:30 PM - Mental Mastery (Strategic Reading & Learning)
         cron.schedule('30 15 * * *', async () => {
-            console.log('⏰ Triggering 03:30 PM Mental Mastery...');
-            await this.dispatchPrompt('mental_mastery', 'Mental Mastery', '📚 **Mental Mastery Check-in (3:30 PM):**\n\nDedicate 20 minutes to your current book or strategic research. Continuous learning compounds exponentially.');
-        });
+            console.log('⏰ [Scheduler] Triggering 03:30 PM Mental Mastery...');
+            await this.runMentalMastery();
+        }, cronOptions);
         // 5. 06:00 PM - Fitness & Physical Movement
         cron.schedule('0 18 * * *', async () => {
-            console.log('⏰ Triggering 06:00 PM Fitness Sentry...');
-            await this.dispatchPrompt('fitness_workout', 'Fitness & Physical Movement', '🏋️ **Fitness & Movement Sentry (6:00 PM):**\n\nTime for physical movement: gym, run, or bodyweight workout. Physical vitality directly drives executive stamina.');
-        });
+            console.log('⏰ [Scheduler] Triggering 06:00 PM Fitness Sentry...');
+            await this.runFitnessMovement();
+        }, cronOptions);
         // 6. 08:00 PM - Daily Financial Expense Check-in ("Cephas Finance Tracker")
         cron.schedule('0 20 * * *', async () => {
-            console.log('⏰ Triggering 08:00 PM Daily Expense Check-in...');
-            await this.dispatchPrompt('daily_expense_checkin', 'Daily Expense Check-in', '💰 **Daily Expense Check-in (8:00 PM):**\n\nCephas, what expenses did you incur today?\n\nReply directly with your expenses (e.g. _"15k fuel, 4k lunch, $20 software"_) and I will log them to your **Cephas Finance Tracker** spreadsheet.');
-        });
+            console.log('⏰ [Scheduler] Triggering 08:00 PM Daily Expense Check-in...');
+            await this.runFinanceCheckin();
+        }, cronOptions);
         // 7. 09:00 PM - Evening Strategic Debrief
         cron.schedule('0 21 * * *', async () => {
-            console.log('⏰ Triggering 09:00 PM Evening Strategic Debrief...');
+            console.log('⏰ [Scheduler] Triggering 09:00 PM Evening Strategic Debrief...');
             await this.runEveningDebrief();
-        });
-        // 8. Saturday 10:00 PM - Weekly Financial Report & Breakdown
+        }, cronOptions);
+        // 8. Saturday 10:00 PM - Weekly Financial Executive Breakdown
         cron.schedule('0 22 * * 6', async () => {
-            console.log('⏰ Triggering Saturday 10:00 PM Weekly Financial Breakdown...');
+            console.log('⏰ [Scheduler] Triggering Saturday 10:00 PM Weekly Financial Breakdown...');
             await this.runWeeklyFinanceReport();
-        });
-        console.log('✅ [Executive Schedulers] All 8 sentries successfully registered.');
+        }, cronOptions);
+        console.log('✅ [Executive Schedulers] All 8 master sentries registered with timezone: Africa/Lagos.');
     }
     // ---------------------------------------------------------------------------
-    // Sentry Actions
+    // 1. 08:00 AM — Morning Strategic Briefing
     // ---------------------------------------------------------------------------
     async runMorningBriefing() {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        const dateFormatted = today.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric'
+        });
+        // 1. Fetch Calendar Events
         const agenda = await GoogleWorkspaceTools.getTodayAgenda();
+        let agendaText = '• No scheduled calendar meetings for today.';
+        let deepWorkText = '⚡ *Deep Work Window*: Open availability for deep focus blocks today.';
+        if (agenda.length > 0) {
+            agendaText = agenda.map(a => {
+                const time = a.start ? new Date(a.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'All-day';
+                const end = a.end ? ` – ${new Date(a.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}` : '';
+                return `• ${time}${end}: ${a.summary}`;
+            }).join('\n');
+            // Calculate deep work gaps between events (simple heuristic)
+            const sorted = [...agenda].filter(a => a.start && a.end).sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+            if (sorted.length >= 1) {
+                deepWorkText = '⚡ *Deep Work Window*: Focus windows available between meetings.';
+            }
+        }
+        // 2. Fetch Tasks (Top 3 priority)
         const tasks = await GoogleWorkspaceTools.getTopTasks(5);
-        const agendaSummary = agenda.length > 0
-            ? agenda.map(a => `• ${a.start ? new Date(a.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All-day'}: ${a.summary}`).join('\n')
-            : '• No scheduled calendar meetings for today.';
-        const tasksSummary = tasks.length > 0
-            ? tasks.map((t, idx) => `${idx + 1}. [ ] ${t.title}`).join('\n')
-            : '• No pending Google Tasks.';
-        const prompt = `You are Zerubbabel, Chief of Staff to Cephas.
-Author Cephas's Morning Strategic Briefing for today (${today}).
-CALENDAR EVENTS:
-${agendaSummary}
-
-TOP PRIORITY TASKS:
-${tasksSummary}
-
-Format with:
-1. Executive greeting & core thematic focus for today.
-2. 📅 Today's Strategic Agenda (Meetings).
-3. 🎯 Top 3 High-Impact Deliverables (Priority Checklist).
-4. Mindset anchor quote.
-Keep it crisp, empowering, and structured in clean WhatsApp markdown.`;
-        const generated = await aiRouter.executeTask('executive_chat', prompt, { temperature: 0.4 });
-        const text = generated.text.trim();
-        upsertHabitLog('morning_briefing', 'Morning Strategic Briefing', today, 'completed', 'Briefing generated');
-        saveChatMessage('assistant', text, 'tier2');
-        this.notify('Morning Strategic Briefing', text);
-        return text;
+        const top3 = tasks.slice(0, 3);
+        let tasksText = '1. [ ] Review daily priorities\n2. [ ] Strategy & execution block\n3. [ ] Team / client touchpoints';
+        if (top3.length > 0) {
+            tasksText = top3.map((t, idx) => `${idx + 1}. [ ] ${t.title}`).join('\n');
+            // Cache top tasks in system_settings for interactive quick commands ("Done 1", "Delete 2")
+            setSetting('today_top_tasks', JSON.stringify(top3.map((t, idx) => ({ index: idx + 1, id: t.id, title: t.title }))));
+        }
+        // 3. Fetch Gmail Executive Digest (Last 24 hours)
+        let emailText = '• All inboxes clear. No urgent pending items.';
+        try {
+            const emails = await GoogleWorkspaceTools.getRecentImportantEmails(3);
+            if (emails.length > 0) {
+                emailText = emails.map(e => `• *${e.sender}*: ${e.subject}`).join('\n');
+            }
+        }
+        catch {
+            emailText = '• Email digest available once Google Workspace permissions are connected.';
+        }
+        // 4. Strategic Anchor Quotes Pool
+        const anchors = [
+            '"He who gathers by labor shall increase." — Proverbs 13:11',
+            '"Commit your works to the Lord, and your thoughts will be established." — Proverbs 16:3',
+            '"The soul of the diligent shall be made rich." — Proverbs 13:4',
+            '"Where there is no vision, the people cast off restraint." — Proverbs 29:18',
+            '"Do you see a man skillful in his work? He will stand before kings." — Proverbs 22:29'
+        ];
+        const anchor = anchors[Math.floor(Math.random() * anchors.length)];
+        const brief = `☀️ *GOOD MORNING, CEPHAS!*\n` +
+            `Strategic Briefing for ${dateFormatted}:\n\n` +
+            `📅 *TODAY'S SCHEDULE (Google Calendar)*:\n${agendaText}\n` +
+            `${deepWorkText}\n\n` +
+            `🎯 *TOP PRIORITIES (Google Tasks)*:\n${tasksText}\n\n` +
+            `📬 *EXECUTIVE EMAIL DIGEST (Last 24h)*:\n${emailText}\n\n` +
+            `💡 *STRATEGIC ANCHOR*:\n${anchor}\n\n` +
+            `───────────────────────────\n` +
+            `💬 *Quick Commands*:\n` +
+            `• Reply *"Done 1"* -> Marks task 1 complete in Google Tasks.\n` +
+            `• Reply *"Delete 2"* -> Prunes task 2.\n` +
+            `• Reply *"Move 3 to tomorrow"* -> Reschedules task 3.\n` +
+            `• Or reply with any new task you want me to add!`;
+        upsertHabitLog('morning_briefing', 'Morning Strategic Briefing', todayStr, 'completed', 'Briefing delivered');
+        saveChatMessage('assistant', brief, 'tier2');
+        this.notify('Morning Strategic Briefing', brief);
+        return brief;
     }
+    // ---------------------------------------------------------------------------
+    // 2. 08:30 AM — Spiritual Grounding
+    // ---------------------------------------------------------------------------
+    async runSpiritualGrounding() {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const message = `📖 *Morning Grounding, Cephas!*\n` +
+            `Time to anchor the day in prayer and the Word. What Scripture book and chapter are you studying today?`;
+        upsertHabitLog('spiritual_grounding', 'Spiritual Grounding', todayStr, 'pending');
+        saveChatMessage('assistant', message, 'tier1');
+        this.notify('Spiritual Grounding', message);
+        return message;
+    }
+    // ---------------------------------------------------------------------------
+    // 3. 01:00 PM — Physical Replenishment
+    // ---------------------------------------------------------------------------
+    async runPhysicalReplenishment() {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const message = `🥗 *Midday Reset, Cephas!*\n` +
+            `It's 1:00 PM. Time to step away from your screens. Have you had lunch and water today?\n` +
+            `(Reply *"Yes"*, *"Eating now"*, or *"Snooze 30"*)`;
+        upsertHabitLog('physical_replenishment', 'Midday Lunch', todayStr, 'pending');
+        saveChatMessage('assistant', message, 'tier1');
+        this.notify('Physical Replenishment', message);
+        return message;
+    }
+    // ---------------------------------------------------------------------------
+    // 4. 03:30 PM — Mental Mastery
+    // ---------------------------------------------------------------------------
+    async runMentalMastery() {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const message = `📚 *Mental Mastery Check-in, Cephas!*\n` +
+            `Time for your daily intellectual growth. What book and chapter are you reading today?`;
+        upsertHabitLog('mental_mastery', 'Book Reading', todayStr, 'pending');
+        saveChatMessage('assistant', message, 'tier1');
+        this.notify('Mental Mastery', message);
+        return message;
+    }
+    // ---------------------------------------------------------------------------
+    // 5. 06:00 PM — Fitness & Physical Movement
+    // ---------------------------------------------------------------------------
+    async runFitnessMovement() {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const message = `🏋️ *End-of-Day Vitality Sentry, Cephas!*\n` +
+            `Time to close the laptop and get some physical movement in. Are we working out today?\n` +
+            `(Reply *"Done"*, *"Going now"*, or *"Rest day"*)`;
+        upsertHabitLog('fitness_workout', 'Evening Workout', todayStr, 'pending');
+        saveChatMessage('assistant', message, 'tier1');
+        this.notify('Fitness Sentry', message);
+        return message;
+    }
+    // ---------------------------------------------------------------------------
+    // 6. 08:00 PM — Daily Financial Expense Check-in
+    // ---------------------------------------------------------------------------
+    async runFinanceCheckin() {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const message = `💳 *Cephas Finance Tracker — 8:00 PM Check-in!*\n` +
+            `Did you make any personal or business expenses today? Send me the amounts and what they were for (e.g., '15k fuel, 5k lunch, 50k server').`;
+        upsertHabitLog('daily_expense_checkin', 'Finance Check-in', todayStr, 'pending');
+        saveChatMessage('assistant', message, 'tier1');
+        this.notify('Finance Check-in', message);
+        return message;
+    }
+    // ---------------------------------------------------------------------------
+    // 7. 09:00 PM — Evening Strategic Debrief
+    // ---------------------------------------------------------------------------
     async runEveningDebrief() {
-        const today = new Date().toISOString().split('T')[0];
-        const prompt = `You are Zerubbabel, Chief of Staff to Cephas.
-Draft a concise, reflective Evening Strategic Debrief for Cephas at 9:00 PM.
-Prompt him to:
-1. Acknowledge today's biggest win.
-2. Note any carry-overs to tomorrow.
-3. Name the #1 objective for tomorrow morning.
-Keep it short, structured, and intentional.`;
-        const generated = await aiRouter.executeTask('executive_chat', prompt, { temperature: 0.4 });
-        const text = generated.text.trim();
-        upsertHabitLog('evening_debrief', 'Evening Strategic Debrief', today, 'pending', 'Debrief sent');
-        saveChatMessage('assistant', text, 'tier2');
-        this.notify('Evening Strategic Debrief', text);
-        return text;
+        const todayStr = new Date().toISOString().split('T')[0];
+        // 1. Fetch Habit Adherence for Today
+        const habitSummary = getHabitScoreForDate(todayStr);
+        const habitLines = habitSummary.habits.map(h => {
+            const icon = h.completed ? '✅ Completed' : '⏳ Pending';
+            const detail = h.detail ? ` (${h.detail})` : '';
+            return `• ${h.label.padEnd(20)}: ${icon}${detail}`;
+        }).join('\n');
+        const scoreStr = habitSummary.score === habitSummary.total
+            ? `👉 *Score: ${habitSummary.score}/${habitSummary.total} Perfect Day! 🏆*`
+            : `👉 *Score: ${habitSummary.score}/${habitSummary.total} (${Math.round((habitSummary.score / habitSummary.total) * 100)}%)*`;
+        // 2. Fetch Tasks status from Google Tasks
+        let completedText = '• Review daily priorities';
+        let rolloverText = '• Strategic execution block';
+        try {
+            const topTasks = await GoogleWorkspaceTools.getTopTasks(5);
+            if (topTasks.length > 0) {
+                rolloverText = topTasks.map(t => `• ${t.title}`).join('\n');
+            }
+            else {
+                rolloverText = '• No pending carry-overs!';
+            }
+        }
+        catch {
+            // fallback
+        }
+        const debrief = `🌙 *EVENING STRATEGIC DEBRIEF (9:00 PM)*\n` +
+            `Day in Review, Cephas:\n\n` +
+            `✅ *COMPLETED OBJECTIVES*:\n${completedText}\n\n` +
+            `⏳ *ROLLING OVER TO TOMORROW*:\n${rolloverText}\n\n` +
+            `🔥 *HABIT ADHERENCE TODAY*:\n${habitLines}\n` +
+            `${scoreStr}\n\n` +
+            `💬 *Daily Reflection*:\n` +
+            `Reply with your biggest win from today, or tell me your #1 priority to tackle first thing tomorrow morning!`;
+        upsertHabitLog('evening_debrief', 'Evening Strategic Debrief', todayStr, 'completed', 'Debrief delivered');
+        saveChatMessage('assistant', debrief, 'tier2');
+        this.notify('Evening Strategic Debrief', debrief);
+        return debrief;
     }
+    // ---------------------------------------------------------------------------
+    // 8. Saturday 10:00 PM — Weekly Financial Executive Breakdown
+    // ---------------------------------------------------------------------------
     async runWeeklyFinanceReport() {
         const report = await financeTracker.generateWeeklyReport();
         saveChatMessage('assistant', report, 'tier2');
-        this.notify('Weekly Financial Report', report);
+        this.notify('Weekly Financial Breakdown', report);
         return report;
-    }
-    async dispatchPrompt(habitKey, title, text) {
-        const today = new Date().toISOString().split('T')[0];
-        upsertHabitLog(habitKey, title, today, 'pending');
-        saveChatMessage('assistant', text, 'tier1');
-        this.notify(title, text);
     }
     notify(title, message) {
         if (this.onNotificationCallback) {
             this.onNotificationCallback(title, message);
         }
-        // Also dispatch to personal WhatsApp if Socket 2 is available
+        // Dispatch to Cephas's WhatsApp if Assistant Socket is connected
         if (this.assistantSocket && config.cephasPersonalPhone) {
-            this.assistantSocket.sendMessage(config.cephasPersonalPhone, message).catch(() => { });
+            this.assistantSocket.sendMessage(config.cephasPersonalPhone, message).catch(err => {
+                console.warn(`⚠️ [Scheduler Notify] Could not dispatch ${title} via WhatsApp:`, err?.message || err);
+            });
         }
     }
 }

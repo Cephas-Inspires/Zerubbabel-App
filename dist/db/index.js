@@ -255,3 +255,80 @@ export const markExpenseSynced = (id) => {
     const db = getDatabase();
     db.prepare('UPDATE finance_logs SET google_sheet_synced = 1 WHERE id = ?').run(id);
 };
+export const saveSpiritualJournal = (date, scriptureReference, keyThemes = null, cephasReflection = null) => {
+    const db = getDatabase();
+    const info = db.prepare(`
+    INSERT INTO spiritual_journal (date, scripture_reference, key_themes, cephas_reflection)
+    VALUES (?, ?, ?, ?)
+  `).run(date, scriptureReference, keyThemes, cephasReflection);
+    return {
+        id: Number(info.lastInsertRowid),
+        date,
+        scripture_reference: scriptureReference,
+        key_themes: keyThemes,
+        cephas_reflection: cephasReflection
+    };
+};
+export const getSpiritualJournals = (limit = 10) => {
+    const db = getDatabase();
+    return db
+        .prepare('SELECT * FROM spiritual_journal ORDER BY id DESC LIMIT ?')
+        .all(limit);
+};
+export const saveReadingNote = (date, bookTitle, chapter = null, keyFramework = null, cephasInsight = null) => {
+    const db = getDatabase();
+    const info = db.prepare(`
+    INSERT INTO reading_notes (date, book_title, chapter, key_framework, cephas_insight)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(date, bookTitle, chapter, keyFramework, cephasInsight);
+    return {
+        id: Number(info.lastInsertRowid),
+        date,
+        book_title: bookTitle,
+        chapter,
+        key_framework: keyFramework,
+        cephas_insight: cephasInsight
+    };
+};
+export const getReadingNotes = (limit = 10) => {
+    const db = getDatabase();
+    return db
+        .prepare('SELECT * FROM reading_notes ORDER BY id DESC LIMIT ?')
+        .all(limit);
+};
+export const getHabitScoreForDate = (logDate) => {
+    const db = getDatabase();
+    const records = db.prepare('SELECT * FROM habit_logs WHERE log_date = ?').all(logDate);
+    const map = new Map();
+    for (const r of records) {
+        map.set(r.habit_key, r);
+    }
+    const definedHabits = [
+        { key: 'spiritual_grounding', label: 'Spiritual Grounding' },
+        { key: 'physical_replenishment', label: 'Midday Lunch' },
+        { key: 'mental_mastery', label: 'Book Reading' },
+        { key: 'fitness_workout', label: 'Evening Workout' },
+        { key: 'daily_expense_checkin', label: 'Finance Check-in' }
+    ];
+    let score = 0;
+    const list = definedHabits.map(h => {
+        const rec = map.get(h.key);
+        const status = rec?.status || 'pending';
+        const isSuccess = status === 'completed' || status === 'rest_day';
+        if (isSuccess)
+            score++;
+        return {
+            key: h.key,
+            label: h.label,
+            status,
+            completed: isSuccess,
+            detail: rec?.response_notes || null
+        };
+    });
+    return {
+        date: logDate,
+        score,
+        total: definedHabits.length,
+        habits: list
+    };
+};

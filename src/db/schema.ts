@@ -109,4 +109,25 @@ CREATE TABLE IF NOT EXISTS finance_logs (
 
 CREATE INDEX IF NOT EXISTS idx_finance_date ON finance_logs(date);
 CREATE INDEX IF NOT EXISTS idx_finance_month_year ON finance_logs(month_year);
+
+-- 9. Spiritual Journal Reflections (8:30 AM Grounding)
+CREATE TABLE IF NOT EXISTS spiritual_journal (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  scripture_reference TEXT NOT NULL,
+  key_themes TEXT,
+  cephas_reflection TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 10. Reading Notes Bank (3:30 PM Mental Mastery)
+CREATE TABLE IF NOT EXISTS reading_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  book_title TEXT NOT NULL,
+  chapter TEXT,
+  key_framework TEXT,
+  cephas_insight TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 `;

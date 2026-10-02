@@ -84,4 +84,9 @@ export class GoogleAuthManager {
     const auth = await this.getAuthClient();
     return google.people({ version: 'v1', auth });
   }
+
+  public static async getGmailClient() {
+    const auth = await this.getAuthClient();
+    return google.gmail({ version: 'v1', auth });
+  }
 }

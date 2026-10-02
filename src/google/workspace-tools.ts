@@ -126,6 +126,87 @@ export class GoogleWorkspaceTools {
     };
   }
 
+  public static async completeTask(taskId: string): Promise<boolean> {
+    if (!GoogleAuthManager.isConfigured()) return false;
+    try {
+      const tasks = await GoogleAuthManager.getTasksClient();
+      await tasks.tasks.patch({
+        tasklist: '@default',
+        task: taskId,
+        requestBody: {
+          status: 'completed'
+        }
+      });
+      return true;
+    } catch (err: any) {
+      console.warn('⚠️ Google Tasks complete failed:', err?.message || err);
+      return false;
+    }
+  }
+
+  public static async deleteTask(taskId: string): Promise<boolean> {
+    if (!GoogleAuthManager.isConfigured()) return false;
+    try {
+      const tasks = await GoogleAuthManager.getTasksClient();
+      await tasks.tasks.delete({
+        tasklist: '@default',
+        task: taskId
+      });
+      return true;
+    } catch (err: any) {
+      console.warn('⚠️ Google Tasks delete failed:', err?.message || err);
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Gmail API (Past 24 Hours Executive Digest)
+  // ---------------------------------------------------------------------------
+  public static async getRecentImportantEmails(maxResults = 3): Promise<Array<{ id: string; sender: string; subject: string; snippet: string }>> {
+    if (!GoogleAuthManager.isConfigured()) return [];
+    try {
+      const gmail = await GoogleAuthManager.getGmailClient();
+      const oneDayAgo = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
+      const res = await gmail.users.messages.list({
+        userId: 'me',
+        q: `after:${oneDayAgo} is:unread -category:promotions -category:spam`,
+        maxResults
+      });
+
+      const messages = res.data.messages || [];
+      const digests: Array<{ id: string; sender: string; subject: string; snippet: string }> = [];
+
+      for (const m of messages) {
+        if (!m.id) continue;
+        const detail = await gmail.users.messages.get({
+          userId: 'me',
+          id: m.id,
+          format: 'metadata',
+          metadataHeaders: ['From', 'Subject', 'Date']
+        });
+
+        const headers = detail.data.payload?.headers || [];
+        const fromHeader = headers.find((h: any) => h.name?.toLowerCase() === 'from')?.value || 'Unknown Sender';
+        const subjectHeader = headers.find((h: any) => h.name?.toLowerCase() === 'subject')?.value || '(No Subject)';
+
+        const senderMatch = fromHeader.match(/^"?([^"<]+)"?\s*(?:<.*>)?$/);
+        const cleanSender = senderMatch ? senderMatch[1].trim() : fromHeader;
+
+        digests.push({
+          id: m.id,
+          sender: cleanSender,
+          subject: subjectHeader,
+          snippet: detail.data.snippet || ''
+        });
+      }
+
+      return digests;
+    } catch (err: any) {
+      console.warn('⚠️ Gmail digest fetch failed:', err?.message || err);
+      return [];
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Google Contacts -> Local SQLite Sync
   // ---------------------------------------------------------------------------

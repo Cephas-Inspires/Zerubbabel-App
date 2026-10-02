@@ -232,7 +232,7 @@ export interface HabitRecord {
   id?: number;
   habit_key: string;
   title: string;
-  status: 'pending' | 'completed' | 'skipped';
+  status: 'pending' | 'completed' | 'skipped' | 'rest_day' | 'snoozed';
   log_date: string;
   response_notes: string | null;
   completed_at: string | null;
@@ -242,7 +242,7 @@ export const upsertHabitLog = (
   habitKey: string,
   title: string,
   logDate: string,
-  status: 'pending' | 'completed' | 'skipped',
+  status: 'pending' | 'completed' | 'skipped' | 'rest_day' | 'snoozed',
   notes: string | null = null
 ): void => {
   const db = getDatabase();
@@ -440,5 +440,143 @@ export const getExpensesForMonth = (monthYear: string): FinanceRecord[] => {
 export const markExpenseSynced = (id: number): void => {
   const db = getDatabase();
   db.prepare('UPDATE finance_logs SET google_sheet_synced = 1 WHERE id = ?').run(id);
+};
+
+// -----------------------------------------------------------------------------
+// Spiritual Journal DAO
+// -----------------------------------------------------------------------------
+export interface SpiritualJournalRecord {
+  id?: number;
+  date: string;
+  scripture_reference: string;
+  key_themes: string | null;
+  cephas_reflection: string | null;
+  created_at?: string;
+}
+
+export const saveSpiritualJournal = (
+  date: string,
+  scriptureReference: string,
+  keyThemes: string | null = null,
+  cephasReflection: string | null = null
+): SpiritualJournalRecord => {
+  const db = getDatabase();
+  const info = db.prepare(`
+    INSERT INTO spiritual_journal (date, scripture_reference, key_themes, cephas_reflection)
+    VALUES (?, ?, ?, ?)
+  `).run(date, scriptureReference, keyThemes, cephasReflection);
+
+  return {
+    id: Number(info.lastInsertRowid),
+    date,
+    scripture_reference: scriptureReference,
+    key_themes: keyThemes,
+    cephas_reflection: cephasReflection
+  };
+};
+
+export const getSpiritualJournals = (limit = 10): SpiritualJournalRecord[] => {
+  const db = getDatabase();
+  return db
+    .prepare('SELECT * FROM spiritual_journal ORDER BY id DESC LIMIT ?')
+    .all(limit) as SpiritualJournalRecord[];
+};
+
+// -----------------------------------------------------------------------------
+// Reading Notes DAO
+// -----------------------------------------------------------------------------
+export interface ReadingNotesRecord {
+  id?: number;
+  date: string;
+  book_title: string;
+  chapter: string | null;
+  key_framework: string | null;
+  cephas_insight: string | null;
+  created_at?: string;
+}
+
+export const saveReadingNote = (
+  date: string,
+  bookTitle: string,
+  chapter: string | null = null,
+  keyFramework: string | null = null,
+  cephasInsight: string | null = null
+): ReadingNotesRecord => {
+  const db = getDatabase();
+  const info = db.prepare(`
+    INSERT INTO reading_notes (date, book_title, chapter, key_framework, cephas_insight)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(date, bookTitle, chapter, keyFramework, cephasInsight);
+
+  return {
+    id: Number(info.lastInsertRowid),
+    date,
+    book_title: bookTitle,
+    chapter,
+    key_framework: keyFramework,
+    cephas_insight: cephasInsight
+  };
+};
+
+export const getReadingNotes = (limit = 10): ReadingNotesRecord[] => {
+  const db = getDatabase();
+  return db
+    .prepare('SELECT * FROM reading_notes ORDER BY id DESC LIMIT ?')
+    .all(limit) as ReadingNotesRecord[];
+};
+
+// -----------------------------------------------------------------------------
+// Habit Adherence Score for Date
+// -----------------------------------------------------------------------------
+export interface HabitAdherenceSummary {
+  date: string;
+  score: number; // completed or rest_day count
+  total: number;
+  habits: {
+    key: string;
+    label: string;
+    status: string;
+    completed: boolean;
+    detail: string | null;
+  }[];
+}
+
+export const getHabitScoreForDate = (logDate: string): HabitAdherenceSummary => {
+  const db = getDatabase();
+  const records = db.prepare('SELECT * FROM habit_logs WHERE log_date = ?').all(logDate) as HabitRecord[];
+  const map = new Map<string, HabitRecord>();
+  for (const r of records) {
+    map.set(r.habit_key, r);
+  }
+
+  const definedHabits = [
+    { key: 'spiritual_grounding', label: 'Spiritual Grounding' },
+    { key: 'physical_replenishment', label: 'Midday Lunch' },
+    { key: 'mental_mastery', label: 'Book Reading' },
+    { key: 'fitness_workout', label: 'Evening Workout' },
+    { key: 'daily_expense_checkin', label: 'Finance Check-in' }
+  ];
+
+  let score = 0;
+  const list = definedHabits.map(h => {
+    const rec = map.get(h.key);
+    const status = rec?.status || 'pending';
+    const isSuccess = status === 'completed' || status === 'rest_day';
+    if (isSuccess) score++;
+    return {
+      key: h.key,
+      label: h.label,
+      status,
+      completed: isSuccess,
+      detail: rec?.response_notes || null
+    };
+  });
+
+  return {
+    date: logDate,
+    score,
+    total: definedHabits.length,
+    habits: list
+  };
 };
 
