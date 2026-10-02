@@ -18,6 +18,7 @@ import {
 import { WhatsAppSocketManager } from '../whatsapp/socket-manager.js';
 import { aiRouter } from '../ai/router.js';
 import { GoogleAuthManager } from '../google/auth.js';
+import { DraftEngine } from '../services/draft-engine.js';
 
 export class ApiServer {
   private app = express();
@@ -25,11 +26,13 @@ export class ApiServer {
   private wss = new WebSocketServer({ server: this.server });
   private personalSocket: WhatsAppSocketManager;
   private assistantSocket: WhatsAppSocketManager;
+  private draftEngine: DraftEngine;
   private startTime = Date.now();
 
   constructor(personalSocket: WhatsAppSocketManager, assistantSocket: WhatsAppSocketManager) {
     this.personalSocket = personalSocket;
     this.assistantSocket = assistantSocket;
+    this.draftEngine = new DraftEngine(assistantSocket);
     this.setupMiddlewares();
     this.setupRoutes();
     this.setupWebSockets();
@@ -216,19 +219,48 @@ export class ApiServer {
           return res.status(400).json({ error: 'Message text is required' });
         }
 
-        // Save Cephas's message
+        // Save Cephas's message to SQLite
         saveChatMessage('user', message);
 
-        // Process through Tier 2 Executive Flash
+        // Step 1: Check if instruction triggers draft creation or active disambiguation
+        const draftResult = await this.draftEngine.processExecutiveInstruction(message);
+
+        if (draftResult.type === 'draft_staged' || draftResult.type === 'disambiguation_required') {
+          const assistantMsg = saveChatMessage('assistant', draftResult.replyText, 'tier2');
+          this.broadcast('CHAT_MESSAGE', assistantMsg);
+          if (draftResult.draft) {
+            this.broadcast('NEW_DRAFT', draftResult.draft);
+          }
+
+          return res.json({
+            reply: draftResult.replyText,
+            type: draftResult.type,
+            draft: draftResult.draft,
+            matches: draftResult.matches,
+            tier: 'tier2',
+            model: config.modelTier2Workhorse
+          });
+        }
+
+        if (draftResult.type === 'chat_reply' && draftResult.replyText) {
+          const assistantMsg = saveChatMessage('assistant', draftResult.replyText, 'tier1');
+          this.broadcast('CHAT_MESSAGE', assistantMsg);
+          return res.json({
+            reply: draftResult.replyText,
+            type: 'chat_reply',
+            tier: 'tier1',
+            model: config.modelTier1Router
+          });
+        }
+
+        // Step 2: Fall back to standard executive chat reasoning via Tier 2 Executive Flash
         const result = await aiRouter.executeTask('executive_chat', message);
-
-        // Save Zerubbabel's response
         const assistantMsg = saveChatMessage('assistant', result.text, result.actualTier);
-
         this.broadcast('CHAT_MESSAGE', assistantMsg);
 
         res.json({
           reply: result.text,
+          type: 'chat_reply',
           tier: result.actualTier,
           model: result.modelUsed
         });
@@ -247,28 +279,11 @@ export class ApiServer {
     this.app.post('/api/drafts/:id/approve', async (req: Request, res: Response) => {
       const paramId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const draftId = parseInt(paramId, 10);
-      const draft = getDraftById(draftId);
-
-      if (!draft) {
-        return res.status(404).json({ error: 'Draft not found' });
-      }
-
-      if (draft.status !== 'pending_approval') {
-        return res.status(400).json({ error: `Draft is already ${draft.status}` });
-      }
 
       try {
-        updateDraftStatus(draftId, 'approved');
-        
-        // Append official signature
-        const messageToSend = `${draft.draft_text}\n\n${config.outboundSignature}`;
-        
-        // Dispatch via Socket 2 (Assistant SIM)
-        await this.assistantSocket.sendMessage(draft.recipient_phone, messageToSend, draftId);
-
+        const result = await this.draftEngine.approveAndDispatch(draftId);
         this.broadcast('DRAFT_UPDATED', { id: draftId, status: 'sent' });
-
-        res.json({ success: true, message: 'Draft approved and dispatched via WhatsApp Socket 2' });
+        res.json({ success: true, message: result.message });
       } catch (error: any) {
         res.status(500).json({ error: error.message || 'Failed to dispatch approved draft' });
       }
@@ -277,9 +292,22 @@ export class ApiServer {
     this.app.post('/api/drafts/:id/cancel', (req: Request, res: Response) => {
       const paramId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const draftId = parseInt(paramId, 10);
-      updateDraftStatus(draftId, 'rejected', 'User cancelled via Executive Cockpit');
+      const reason = req.body?.reason || 'Cancelled by Cephas in Executive Cockpit';
+      this.draftEngine.cancelDraft(draftId, reason);
       this.broadcast('DRAFT_UPDATED', { id: draftId, status: 'rejected' });
       res.json({ success: true, message: 'Draft rejected' });
+    });
+
+    this.app.put('/api/drafts/:id', (req: Request, res: Response) => {
+      const paramId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const draftId = parseInt(paramId, 10);
+      const { text } = req.body;
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: 'Text is required for draft update' });
+      }
+      this.draftEngine.editDraft(draftId, text);
+      this.broadcast('DRAFT_UPDATED', { id: draftId, draft_text: text });
+      res.json({ success: true, message: 'Draft updated' });
     });
 
     // 4. Contacts Address Book

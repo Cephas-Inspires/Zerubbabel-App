@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "test:db": "tsx src/db/test-db.ts",
     "test:ai": "tsx src/ai/test-ai.ts",
+    "test:draft": "tsx src/services/test-draft-engine.ts",
     "pair:personal": "tsx src/whatsapp/pair-personal.ts",
     "pair:assistant": "tsx src/whatsapp/pair-assistant.ts"
   },

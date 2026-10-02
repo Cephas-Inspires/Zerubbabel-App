@@ -162,6 +162,11 @@ export const updateDraftStatus = (
   }
 };
 
+export const updateDraftText = (id: number, newText: string): void => {
+  const db = getDatabase();
+  db.prepare('UPDATE draft_queue SET draft_text = ? WHERE id = ?').run(newText, id);
+};
+
 // -----------------------------------------------------------------------------
 // Group Buffer DAO (Rolling 30+ Message Context)
 // -----------------------------------------------------------------------------
