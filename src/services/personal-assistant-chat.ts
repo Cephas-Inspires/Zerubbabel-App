@@ -25,43 +25,47 @@ export class PersonalAssistantChatService {
 
   private attachSockets() {
     const handleEvent = async (event: IncomingMessageEvent) => {
+      // 1. Ignore group chats in direct 1-on-1 assistant service
       if (event.isGroup) return;
 
-      const rawId = event.rawMessageId || `${event.timestamp}-${event.messageText.substring(0, 10)}`;
-      if (this.processedMsgIds.has(rawId)) {
-        return; // Already processed by the other socket
-      }
-
-      const normalizedSender = (event.senderPhone || '').replace(/\D/g, '');
-      const normalizedCephas = config.cephasPersonalPhone.replace(/\D/g, '');
-      const normalizedAssistant = config.zerubAssistantPhone.replace(/\D/g, '');
-      const remoteClean = (event.remoteJid || '').replace(/\D/g, '');
-
-      // Detect if this message represents Cephas talking to Zerubbabel:
-      // Case 1: Received on Assistant Socket from Cephas
-      const isFromCephasOnAssistant = 
-        event.role === 'assistant_dispatcher' && 
-        !event.fromMe && 
-        (normalizedSender === normalizedCephas ||
-         normalizedSender.endsWith(normalizedCephas.slice(-10)) ||
-         event.senderJid.includes(normalizedCephas));
-
-      // Case 2: Sent from Cephas's Personal Socket directed to Assistant SIM
-      const isFromCephasOnPersonal =
-        event.role === 'personal_observer' &&
-        event.fromMe &&
-        (remoteClean === normalizedAssistant ||
-         remoteClean.endsWith(normalizedAssistant.slice(-10)));
-
-      if (!isFromCephasOnAssistant && !isFromCephasOnPersonal) {
+      // 2. Ignore messages sent out by the assistant itself
+      if (event.role === 'assistant_dispatcher' && event.fromMe) {
         return;
       }
 
-      // Mark message ID as processed
+      // 3. Determine if this message is for Zerubbabel:
+      // Case A: ANY 1-on-1 incoming message to the Assistant Socket (Socket 2)
+      // Since Socket 2 is Cephas's private Chief of Staff line, any incoming direct message is accepted.
+      const isDirectToAssistant = event.role === 'assistant_dispatcher' && !event.fromMe;
+
+      // Case B: Sent from Cephas's Personal Socket (Socket 1) directed to Assistant SIM
+      const normalizedAssistant = config.zerubAssistantPhone.replace(/\D/g, '');
+      const remoteClean = (event.remoteJid || '').replace(/\D/g, '');
+      const isFromPersonalToAssistant =
+        event.role === 'personal_observer' &&
+        event.fromMe &&
+        (remoteClean === normalizedAssistant ||
+         remoteClean.endsWith(normalizedAssistant.slice(-10)) ||
+         (event.remoteJid && event.remoteJid.includes(normalizedAssistant)));
+
+      if (!isDirectToAssistant && !isFromPersonalToAssistant) {
+        return;
+      }
+
+      // 4. Deduplicate across dual sockets
+      const rawId = event.rawMessageId || `${event.timestamp}-${event.messageText.substring(0, 15)}`;
+      if (this.processedMsgIds.has(rawId)) {
+        return;
+      }
       this.processedMsgIds.add(rawId);
       setTimeout(() => this.processedMsgIds.delete(rawId), 60000);
 
-      await this.handleCephasDirectMessage(event.messageText);
+      // 5. Determine reply JID: reply directly back to sender thread, fallback to Cephas JID
+      const replyJid = (event.role === 'assistant_dispatcher' && event.remoteJid)
+        ? event.remoteJid
+        : `${config.cephasPersonalPhone}@s.whatsapp.net`;
+
+      await this.handleCephasDirectMessage(event.messageText, replyJid);
     };
 
     // Attach to Assistant Socket (Socket 2)
@@ -76,19 +80,19 @@ export class PersonalAssistantChatService {
   /**
    * Handle Cephas chatting directly with Zerubbabel via WhatsApp
    */
-  public async handleCephasDirectMessage(messageText: string) {
+  public async handleCephasDirectMessage(messageText: string, targetJid?: string) {
     const trimmed = messageText.trim();
     if (!trimmed) return;
 
+    const replyJid = targetJid || `${config.cephasPersonalPhone}@s.whatsapp.net`;
+
     console.log(`\n======================================================`);
-    console.log(`💬 [WhatsApp EA Direct] Incoming directive from Cephas:`);
-    console.log(`"${trimmed}"`);
+    console.log(`📥 [WhatsApp EA Direct] Incoming directive from Cephas:`);
+    console.log(`"${trimmed}" (thread: ${replyJid})`);
     console.log(`======================================================\n`);
 
     // Save Cephas's incoming message
     saveChatMessage('user', trimmed);
-
-    const cephasJid = `${config.cephasPersonalPhone}@s.whatsapp.net`;
 
     try {
       const lower = trimmed.toLowerCase();
@@ -100,12 +104,12 @@ export class PersonalAssistantChatService {
           const latest = pending[0];
           await this.draftEngine.approveAndDispatch(latest.id);
           const reply = `🚀 *Dispatched to ${latest.recipient_name || latest.recipient_phone}:*\n\n"${latest.draft_text}"\n\n— Zerubbabel`;
-          await this.assistantSocket.sendMessage(cephasJid, reply);
+          await this.assistantSocket.sendMessage(replyJid, reply);
           saveChatMessage('assistant', reply, 'tier1');
           return;
         } else {
           const reply = `ℹ️ Cephas, there are no pending drafts in the queue to send right now.`;
-          await this.assistantSocket.sendMessage(cephasJid, reply);
+          await this.assistantSocket.sendMessage(replyJid, reply);
           saveChatMessage('assistant', reply, 'tier1');
           return;
         }
@@ -118,7 +122,7 @@ export class PersonalAssistantChatService {
           const latest = pending[0];
           this.draftEngine.cancelDraft(latest.id, 'Cancelled via WhatsApp by Cephas');
           const reply = `🗑️ *Cancelled draft for ${latest.recipient_name || latest.recipient_phone}.* It will not be sent.`;
-          await this.assistantSocket.sendMessage(cephasJid, reply);
+          await this.assistantSocket.sendMessage(replyJid, reply);
           saveChatMessage('assistant', reply, 'tier1');
           return;
         }
@@ -135,39 +139,39 @@ export class PersonalAssistantChatService {
           `👉 *Reply "SEND" to approve & dispatch*\n` +
           `👉 *Reply "CANCEL" to abort*`;
 
-        await this.assistantSocket.sendMessage(cephasJid, reply);
+        await this.assistantSocket.sendMessage(replyJid, reply);
         saveChatMessage('assistant', reply, 'tier2');
         console.log(`✅ [WhatsApp EA Direct] Staged draft sent to Cephas for review.`);
         return;
       }
 
       if (draftResult.type === 'disambiguation_required') {
-        await this.assistantSocket.sendMessage(cephasJid, draftResult.replyText);
+        await this.assistantSocket.sendMessage(replyJid, draftResult.replyText);
         saveChatMessage('assistant', draftResult.replyText, 'tier2');
         return;
       }
 
       if (draftResult.type === 'chat_reply' && draftResult.replyText) {
         // Natural expense log or direct assistant reply
-        await this.assistantSocket.sendMessage(cephasJid, draftResult.replyText);
+        await this.assistantSocket.sendMessage(replyJid, draftResult.replyText);
         saveChatMessage('assistant', draftResult.replyText, 'tier1');
         console.log(`✅ [WhatsApp EA Direct] Replied to Cephas (Expense/Direct): ${draftResult.replyText}`);
         return;
       }
 
       // 4. Executive Reasoning & Strategic Chat (Cascading Multi-Model Engine)
-      console.log(`🤖 [WhatsApp EA Direct] Synthesizing executive response via Multi-Model Engine...`);
+      console.log(`🤖 [WhatsApp EA Direct] Synthesizing executive response via Gemini...`);
       const aiResult = await aiRouter.executeTask('executive_chat', trimmed);
       const formattedReply = `${aiResult.text}\n\n_⚡ ${aiResult.modelUsed}_`;
       
-      await this.assistantSocket.sendMessage(cephasJid, formattedReply);
+      await this.assistantSocket.sendMessage(replyJid, formattedReply);
       saveChatMessage('assistant', aiResult.text, aiResult.actualTier);
       console.log(`🚀 [WhatsApp EA Direct] Dispatched response to Cephas via ${aiResult.modelUsed}!`);
 
     } catch (err: any) {
       console.error('❌ Error handling Cephas direct WhatsApp message:', err);
       const errorMsg = `⚠️ Apologies Cephas, I encountered an issue processing that directive: ${err.message || err}`;
-      await this.assistantSocket.sendMessage(cephasJid, errorMsg).catch(() => {});
+      await this.assistantSocket.sendMessage(replyJid, errorMsg).catch(() => {});
     }
   }
 }
