@@ -31,4 +31,6 @@ export interface IncomingMessageEvent {
   timestamp: number;
   isZerubTagged: boolean;
   rawMessageId: string;
+  fromMe?: boolean;
+  remoteJid?: string;
 }

@@ -125,7 +125,8 @@ export class WhatsAppSocketManager extends EventEmitter {
         });
         // Ingest incoming messages
         this.socket.ev.on('messages.upsert', async ({ messages, type }) => {
-            if (type !== 'notify')
+            // Process both notify and append events to never drop real-time incoming messages
+            if (!messages || messages.length === 0)
                 return;
             for (const msg of messages) {
                 if (!msg.message)
@@ -142,14 +143,28 @@ export class WhatsAppSocketManager extends EventEmitter {
                 const cleanJid = participantJid.split('@')[0].split(':')[0];
                 const senderPhone = cleanJid.replace(/\D/g, '');
                 const senderName = msg.pushName || null;
-                // Extract text content
-                const text = msg.message.conversation ||
-                    msg.message.extendedTextMessage?.text ||
-                    msg.message.imageMessage?.caption ||
-                    msg.message.videoMessage?.caption ||
-                    '';
-                if (!text.trim())
+                // Extract message text with full unwrapping (ephemeral, viewOnce, quoted, caption, etc.)
+                let m = msg.message;
+                if (m.ephemeralMessage?.message)
+                    m = m.ephemeralMessage.message;
+                if (m.viewOnceMessage?.message)
+                    m = m.viewOnceMessage.message;
+                if (m.viewOnceMessageV2?.message)
+                    m = m.viewOnceMessageV2.message;
+                if (m.documentWithCaptionMessage?.message)
+                    m = m.documentWithCaptionMessage.message;
+                const text = (m.conversation ||
+                    m.extendedTextMessage?.text ||
+                    m.imageMessage?.caption ||
+                    m.videoMessage?.caption ||
+                    m.documentMessage?.caption ||
+                    m.buttonsResponseMessage?.selectedButtonId ||
+                    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+                    m.templateButtonReplyMessage?.selectedId ||
+                    '').trim();
+                if (!text)
                     continue;
+                console.log(`📥 [WhatsApp ${this.role}] Message from ${senderPhone || remoteJid} (isGroup: ${isGroup}, fromMe: ${isFromMe}): "${text.length > 50 ? text.substring(0, 50) + '...' : text}"`);
                 // 1. Contact Harvesting: Upsert contact into SQLite address book
                 if (senderPhone && senderPhone.length > 5) {
                     upsertContact(senderPhone, senderName, this.role === 'personal_observer' ? 'personal_whatsapp' : 'assistant_whatsapp');
@@ -160,8 +175,7 @@ export class WhatsAppSocketManager extends EventEmitter {
                     text.includes(config.zerubAssistantPhone);
                 // 3. Record in group rolling buffer if group message
                 if (isGroup) {
-                    appendGroupMessage(remoteJid, null, // Group name populated dynamically when known
-                    participantJid, senderName, text, typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Date.now(), isTagged, msg.key.id || null);
+                    appendGroupMessage(remoteJid, null, participantJid, senderName, text, typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Date.now(), isTagged, msg.key.id || null);
                 }
                 const eventPayload = {
                     role: this.role,
@@ -170,10 +184,12 @@ export class WhatsAppSocketManager extends EventEmitter {
                     senderName,
                     isGroup,
                     groupJid: isGroup ? remoteJid : undefined,
+                    remoteJid,
                     messageText: text,
                     timestamp: typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Date.now(),
                     isZerubTagged: isTagged,
-                    rawMessageId: msg.key.id || ''
+                    rawMessageId: msg.key.id || '',
+                    fromMe: isFromMe
                 };
                 this.emit('message', eventPayload);
             }

@@ -28,8 +28,8 @@ async function main() {
         const groupIntelligence = new GroupIntelligenceService(assistantSocket);
         console.log('👥 [Group Intelligence] Active: Listening for @Zerub mentions in all group chats.');
         // 4.1 Initialize Personal WhatsApp Assistant Service (1-on-1 Direct Chat with Cephas)
-        const personalAssistant = new PersonalAssistantChatService(assistantSocket);
-        console.log('💬 [WhatsApp EA] Active: 1-on-1 Direct Chat with Cephas online.');
+        const personalAssistant = new PersonalAssistantChatService(assistantSocket, personalSocket);
+        console.log('💬 [WhatsApp EA] Active: Dual-Socket 1-on-1 Direct Chat with Cephas online.');
         // 5. Initialize Executive Schedulers & Sentry Routines
         const schedulers = new ExecutiveSchedulerService(assistantSocket);
         schedulers.startAllSchedulers();
